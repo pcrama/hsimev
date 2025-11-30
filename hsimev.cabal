@@ -17,7 +17,7 @@ copyright: 2025 Philippe Crama
 extra-source-files: README.org
 
 library
-    exposed-modules:  MyLib
+    exposed-modules:  MyLib, ChargingStation
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -27,6 +27,7 @@ library
     build-depends:    base ^>=4.16.4.0
     hs-source-dirs:   src
     default-language: Haskell2010
+    default-extensions: NamedFieldPuns
 
 executable hsimev
     main-is:          Main.hs
@@ -42,6 +43,7 @@ executable hsimev
 
     hs-source-dirs:   app
     default-language: Haskell2010
+    default-extensions: NamedFieldPuns
 
 test-suite hsimev-test
     default-language: Haskell2010
