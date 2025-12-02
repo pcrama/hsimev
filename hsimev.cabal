@@ -25,9 +25,10 @@ library
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base ^>=4.16.4.0
+                    , text
     hs-source-dirs:   src
     default-language: Haskell2010
-    default-extensions: NamedFieldPuns
+    default-extensions: NamedFieldPuns, OverloadedStrings
 
 executable hsimev
     main-is:          Main.hs
@@ -43,11 +44,16 @@ executable hsimev
 
     hs-source-dirs:   app
     default-language: Haskell2010
-    default-extensions: NamedFieldPuns
+    default-extensions: NamedFieldPuns, OverloadedStrings
 
 test-suite hsimev-test
     default-language: Haskell2010
+    default-extensions: NamedFieldPuns, OverloadedStrings
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          MyLibTest.hs
     build-depends:    base ^>=4.16.4.0
+                    , tasty
+                    , tasty-hunit
+                    , text
+                    , hsimev
