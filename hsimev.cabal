@@ -26,8 +26,10 @@ library
     -- other-extensions:
     build-depends:    base ^>=4.16.4.0
                     , text
+                    , mtl
+                    , transformers
     hs-source-dirs:   src
-    default-language: Haskell2010
+    default-language: GHC2021
     default-extensions: NamedFieldPuns, OverloadedStrings
 
 executable hsimev
@@ -53,6 +55,8 @@ test-suite hsimev-test
     hs-source-dirs:   test
     main-is:          MyLibTest.hs
     build-depends:    base ^>=4.16.4.0
+                    , mtl
+                    , transformers
                     , tasty
                     , tasty-hunit
                     , text
