@@ -30,12 +30,13 @@ iterateWriter f n a = go ([], [a]) n a
     go (ws, xs) n x = let (w, a) = f x in go (w : ws, a : xs) (n - 1) a
 
 main :: IO ()
-main = defaultMain manuallyCheckedComputationTests
+main = defaultMain $ do
+  testGroup "Manually checked" [manuallyCheckedComputationTests, fakeSimulationTest]
 
 manuallyCheckedComputationTests :: TestTree
 manuallyCheckedComputationTests =
   testGroup
-    "Manually checked computation"
+    "computation"
     [ testCase "Just before reaching 80% charge" $ do
         let SimState {tick = ts, session = Session _ sess} = states !! 1
         ts @?= Timestamp 60000
@@ -83,9 +84,121 @@ manuallyCheckedComputationTests =
           transactionId = 1234321,
           meterValuesStateMachine = NextMeterValueSampleDue $ meterValuesPeriodicity `after` startTime
         }
-    stepByMinute :: SimState -> (OutputEvent [] MeterValues, SimState)
+    stepByMinute :: SimState -> (OutputEvent [] SessionOutput, SimState)
     stepByMinute simState@(SimState {tick}) = stepSimulation simState $ minutes 1 `after` tick
     states =
       snd $
         iterateWriter stepByMinute 25 $
           SimState {tick = startTime, session = Session sessConf sessState}
+
+fakeSimulationTest :: TestTree
+fakeSimulationTest =
+  testGroup "simulation traces" $
+    let startTime = Timestamp 0
+        meterValuesPeriodicity = minutes 3
+        sessConf =
+          SessionConfiguration
+            { batteryCapacity = 80000.0,
+              sessionTarget = LeaveAtTick $ minutes 20 `after` startTime,
+              charge = chargeEfficientlyUntil80Percent sessConf,
+              getInstantaneousCurrent = getInstantaneousCurrentMaxUntil80Percent 16 0.0 sessConf,
+              phases = S,
+              stationId = "id_station",
+              connectorId = 2,
+              meterValuesPeriodicity = meterValuesPeriodicity
+            }
+        sessState =
+          Charging
+            { batteryLevel = 16000.0,
+              energyDelivered = 0.0,
+              currentOffered = 11.5,
+              transactionId = 4321234,
+              meterValuesStateMachine = NextMeterValueSampleDue $ meterValuesPeriodicity `after` startTime
+            }
+        (sessionTrace, eventTrace) =
+          fakeSimulation
+            stepSession
+            (Session sessConf sessState)
+            startTime
+            [ (minutes 1 <> seconds 2, SetChargingProfile 4321234 10 "cb10"),
+              (minutes 4 <> seconds 10, SetChargingProfile 4321234 8.5 "cb8p5")
+            ]
+            $ minutes 9 <> seconds 54
+        (expectedSessionTrace, expectedEventTrace) =
+          ( [ ( Timestamp 0,
+                Charging {batteryLevel = 16000.0, energyDelivered = 0.0, currentOffered = 11.5, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180000)}
+              ),
+              ( Timestamp 60000,
+                Charging {batteryLevel = 16037.47, energyDelivered = 44.08, currentOffered = 11.5, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180000)}
+              ),
+              ( Timestamp 62000,
+                Charging {batteryLevel = 16038.72, energyDelivered = 45.55, currentOffered = 10.0, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180000)}
+              ),
+              ( Timestamp 122000,
+                Charging {batteryLevel = 16071.30, energyDelivered = 83.89, currentOffered = 10.0, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180000)}
+              ),
+              ( Timestamp 180000,
+                Charging {batteryLevel = 16102.80, energyDelivered = 120.94, currentOffered = 10.0, transactionId = 4321234, meterValuesStateMachine = Sampled (Timestamp 180000) (MeterValues {mvTransactionId = 4321234, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 180000, mvCurrents = (0.0, 10.0, 0.0), mvOfferedCurrent = 10.0, mvEnergyDelivered = 120.94})}
+              ),
+              ( Timestamp 180100,
+                Charging {batteryLevel = 16102.86, energyDelivered = 121.01, currentOffered = 10.0, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360000)}
+              ),
+              ( Timestamp 240100,
+                Charging {batteryLevel = 16135.44, energyDelivered = 159.34, currentOffered = 10.0, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360000)}
+              ),
+              ( Timestamp 300100,
+                Charging {batteryLevel = 16168.02, energyDelivered = 197.67, currentOffered = 10.0, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360000)}
+              ),
+              ( Timestamp 312000,
+                Charging {batteryLevel = 16174.48, energyDelivered = 205.28, currentOffered = 8.5, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360000)}
+              ),
+              ( Timestamp 360000,
+                Charging {batteryLevel = 16196.64, energyDelivered = 231.34, currentOffered = 8.5, transactionId = 4321234, meterValuesStateMachine = Sampled (Timestamp 360000) (MeterValues {mvTransactionId = 4321234, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 360000, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 231.34})}
+              ),
+              ( Timestamp 360100,
+                Charging {batteryLevel = 16196.69, energyDelivered = 231.40, currentOffered = 8.5, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 540000)}
+              ),
+              ( Timestamp 420100,
+                Charging {batteryLevel = 16224.38, energyDelivered = 263.98, currentOffered = 8.5, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 540000)}
+              ),
+              ( Timestamp 480100,
+                Charging {batteryLevel = 16252.08, energyDelivered = 296.56, currentOffered = 8.5, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 540000)}
+              ),
+              ( Timestamp 540000,
+                Charging {batteryLevel = 16279.73, energyDelivered = 329.09, currentOffered = 8.5, transactionId = 4321234, meterValuesStateMachine = Sampled (Timestamp 540000) (MeterValues {mvTransactionId = 4321234, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 540000, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 329.09})}
+              ),
+              ( Timestamp 540100,
+                Charging {batteryLevel = 16279.77, energyDelivered = 329.14, currentOffered = 8.5, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 720000)}
+              ),
+              ( Timestamp 594000,
+                Charging {batteryLevel = 16304.66, energyDelivered = 358.42, currentOffered = 8.5, transactionId = 4321234, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 720000)}
+              )
+            ],
+            [ (Timestamp 62000, AcceptSetChargingProfile "cb10"),
+              (Timestamp 180100, SendMeterValues (MeterValues {mvTransactionId = 4321234, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 180000, mvCurrents = (0.0, 10.0, 0.0), mvOfferedCurrent = 10.0, mvEnergyDelivered = 120.94166666666698})),
+              (Timestamp 312000, AcceptSetChargingProfile "cb8p5"),
+              (Timestamp 360100, SendMeterValues (MeterValues {mvTransactionId = 4321234, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 360000, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 231.34166666666715})),
+              (Timestamp 540100, SendMeterValues (MeterValues {mvTransactionId = 4321234, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 540000, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 329.09166666666675}))
+            ]
+          )
+     in [ testCase "session trace length" $ assertEqual "prefix" (length sessionTrace) (length expectedSessionTrace),
+          testCase "event trace length" $ assertEqual "prefix" (length eventTrace) (length expectedEventTrace)
+        ]
+          <> [ testCase ("session state @ " <> show obsTs) $ do
+                 assertEqual "Timestamp" obsTs expTs
+                 assertApproxEqual "Energy delivered" 1 obsEnergyDelivered expEnergyDelivered
+                 assertApproxEqual "Current offered" 1 obsCurrentOffered expCurrentOffered
+                 assertApproxEqual "Battery level" 1 obsBatteryLevel expBatteryLevel
+             | ( (obsTs, Session _ (Charging {energyDelivered = obsEnergyDelivered, currentOffered = obsCurrentOffered, batteryLevel = obsBatteryLevel})),
+                 (expTs, Charging {energyDelivered = expEnergyDelivered, currentOffered = expCurrentOffered, batteryLevel = expBatteryLevel})
+                 ) <-
+                 zip sessionTrace expectedSessionTrace
+             ]
+          <> [ testCase ("event @ " <> show obsTs) $ do
+                 assertEqual "Timestamp" obsTs expTs
+                 assertEqual "Event" obsEvt expEvt
+             | ( (obsTs, obsEvt),
+                 (expTs, expEvt)
+                 ) <-
+                 zip eventTrace expectedEventTrace
+             ]

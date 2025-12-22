@@ -9,21 +9,27 @@ module ChargingStation
     Phases (..),
     SessionState (..),
     SessionConfiguration (..),
+    SessionOutput (..),
     Session (..),
+    SetChargingProfile (..),
     SimState (..),
     seconds,
     minutes,
     durationUntil,
     after,
     chargeEfficientlyUntil80Percent,
+    fakeSimulation,
     getInstantaneousCurrentMaxUntil80Percent,
+    stepSession,
   )
 where
 
+import Control.Monad (forM_)
 import Control.Monad.Reader (MonadReader)
 import Control.Monad.Writer (MonadWriter, tell)
 import Data.Bifunctor (first)
-import Data.Monoid ((<>))
+import Data.List (foldl')
+import Data.Monoid (First (..), Last (..), (<>))
 import Data.Text (Text)
 import Data.Word (Word64, Word8)
 
@@ -135,12 +141,22 @@ data MeterValues = MeterValues
   }
   deriving (Show, Eq)
 
+data SessionOutput
+  = -- | transaction Id
+    StartCharge Word64
+  | SendMeterValues MeterValues
+  | AcceptSetChargingProfile Text
+  | RejectSetChargingProfile Text
+  | TimeoutSetChargingProfile Text
+  | EndOfCharge MeterValues
+  deriving (Show, Eq)
+
 data SessionConfiguration = SessionConfiguration
   { -- | how many [Wh] "fit" in the car's battery
     batteryCapacity :: !Double,
     sessionTarget :: !SessionTarget,
     -- | update session state to account for passing of time
-    charge :: SessionState -> Duration -> Timestamp -> (OutputEvent [] MeterValues, SessionState),
+    charge :: SessionState -> Duration -> Timestamp -> (OutputEvent [] SessionOutput, SessionState),
     getInstantaneousCurrent :: Timestamp -> SessionState -> (Double, Double, Double),
     phases :: !Phases,
     stationId :: !Text,
@@ -150,7 +166,11 @@ data SessionConfiguration = SessionConfiguration
 
 data Session = Session !SessionConfiguration !SessionState
 
+instance Show Session where
+  show (Session (SessionConfiguration {batteryCapacity, sessionTarget, phases, stationId, connectorId, meterValuesPeriodicity}) sessionState) = "Session (SessionConfiguration {batteryCapacity=" <> show batteryCapacity <> ", sessionTarget=" <> show sessionTarget <> ", phases=" <> show phases <> ", stationId=" <> show stationId <> ", connectorId=" <> show connectorId <> ", meterValuesPeriodicity=" <> show meterValuesPeriodicity <> "}) (" <> show sessionState <> ")"
+
 data SimState = SimState {tick :: !Timestamp, session :: !Session}
+  deriving (Show)
 
 data InputEvent a = InputEvent
   { ieTick :: !Timestamp,
@@ -180,12 +200,24 @@ instance (Semigroup (w b)) => Semigroup (OutputEvent w b) where
 instance (Semigroup (w b)) => Monoid (OutputEvent w b) where
   mempty = NoEvent
 
+class (Semigroup (w b)) => SemigroupWrapper w b where
+  wrapInSemigroup :: b -> w b
+
+instance SemigroupWrapper First b where
+  wrapInSemigroup = First . Just
+
+instance SemigroupWrapper Last b where
+  wrapInSemigroup = Last . Just
+
+instance SemigroupWrapper [] b where
+  wrapInSemigroup = (: [])
+
 tellNextSimulationStep :: (Monoid (w b), MonadWriter (OutputEvent w b) m) => Duration -> m ()
 tellNextSimulationStep dur = tell $ OutputEvent {oeNext = dur, oeEvent = mempty}
 
-tellNextSimulationStepAndEvent :: (MonadWriter (OutputEvent [] b) m) => Duration -> b -> m b
+tellNextSimulationStepAndEvent :: (SemigroupWrapper w b, MonadWriter (OutputEvent w b) m) => Duration -> b -> m b
 tellNextSimulationStepAndEvent dur evt = do
-  tell $ OutputEvent {oeNext = dur, oeEvent = [evt]}
+  tell $ OutputEvent {oeNext = dur, oeEvent = wrapInSemigroup evt}
   return evt
 
 countPhases :: (Double, Double, Double) -> Int
@@ -201,26 +233,28 @@ chargeEfficientlyUntil80Percent ::
   -- | timestamp of the new session state (i.e. timestamp of last session state + time step)
   Timestamp ->
   -- | new session state
-  (OutputEvent [] MeterValues, SessionState)
+  (OutputEvent [] SessionOutput, SessionState)
 chargeEfficientlyUntil80Percent _ Available _ _ = return Available
 chargeEfficientlyUntil80Percent _ Preparing _ _ = return Preparing
 chargeEfficientlyUntil80Percent
-  (SessionConfiguration {getInstantaneousCurrent, sessionTarget, batteryCapacity})
-  sessionState@(Charging {energyDelivered, batteryLevel, currentOffered})
+  (SessionConfiguration {getInstantaneousCurrent, sessionTarget, batteryCapacity, stationId, connectorId})
+  sessionState@(Charging {energyDelivered, batteryLevel, currentOffered, transactionId})
   dt
   nextTime = do
-    let
     case sessionTarget of
-      LeaveAtTick ts ->
-        if ts <= nextTime then return Available else accumulateEnergy $ nextTime `durationUntil` ts
-      LeaveAfterBoth ts targetLevel ->
-        if (ts <= nextTime) && (targetLevel <= newLevel) then return Available else accumulateEnergy $ nextTime `durationUntil` ts
-      LeaveAfterEither ts targetLevel ->
-        if (ts <= nextTime) || (targetLevel <= newLevel)
-          then return Available
-          else accumulateEnergy $ if ts <= nextTime then defaultNextSimulationStep else nextTime `durationUntil` ts
-      LeaveAtLevel targetLevel ->
-        if targetLevel <= newLevel then return Available else accumulateEnergy defaultNextSimulationStep
+      LeaveAtTick ts
+        | ts <= nextTime -> endOfCharge
+        | otherwise -> accumulateEnergy $ nextTime `durationUntil` ts
+      LeaveAfterBoth ts targetLevel
+        | (ts <= nextTime) && (targetLevel <= newLevel) -> endOfCharge
+        | ts <= nextTime -> accumulateEnergy defaultNextSimulationStep
+        | otherwise -> accumulateEnergy $ nextTime `durationUntil` ts
+      LeaveAfterEither ts targetLevel
+        | (ts <= nextTime) || (targetLevel <= newLevel) -> endOfCharge
+        | otherwise -> accumulateEnergy defaultNextSimulationStep
+      LeaveAtLevel targetLevel
+        | targetLevel <= newLevel -> endOfCharge
+        | otherwise -> accumulateEnergy defaultNextSimulationStep
     where
       instantaneousCurrent = getInstantaneousCurrent (dt `before` nextTime) sessionState
       defaultNextSimulationStep = minutes 5
@@ -229,11 +263,24 @@ chargeEfficientlyUntil80Percent
       deltaEnergyDelivered = (voltage * sumOfCurrents * secondsFrom dt) / 3600.0 -- 3600 to convert from [J] to [Wh]
       batteryPercentage = batteryLevel / batteryCapacity
       chargingEfficiency = if batteryPercentage < 0.8 then 0.85 else 0.75
-      newLevel = batteryLevel + deltaEnergyDelivered * chargingEfficiency
-      newEnergyDelivered = energyDelivered + deltaEnergyDelivered
+      newLevel = min batteryCapacity $ batteryLevel + deltaEnergyDelivered * chargingEfficiency
+      newEnergyDelivered = energyDelivered + (newLevel - batteryLevel) / max 0.1 chargingEfficiency
+      currentMeterValues =
+        MeterValues
+          { mvTransactionId = transactionId,
+            mvStationId = stationId,
+            mvConnectorId = connectorId,
+            mvTimestamp = nextTime,
+            mvCurrents = (0, 0, 0),
+            mvOfferedCurrent = currentOffered,
+            mvEnergyDelivered = newEnergyDelivered
+          }
       accumulateEnergy nextStep = do
         tellNextSimulationStep nextStep
         return sessionState {energyDelivered = newEnergyDelivered, batteryLevel = newLevel}
+      endOfCharge = do
+        tellNextSimulationStepAndEvent defaultNextSimulationStep $ EndOfCharge currentMeterValues
+        return Available
 
 getInstantaneousCurrentMaxUntil80Percent ::
   Double ->
@@ -267,7 +314,7 @@ getInstantaneousCurrentMaxUntil80Percent
       batteryCurrent = if batteryPercentage < knee then maxCurrent else minCurrent + (maxCurrent - minCurrent) * (1.0 - batteryPercentage) / (1 - knee)
       cappedCurrent = if currentOffered == 0 then 0 else max 0.1 $ min batteryCurrent $ currentOffered - offset
 
-stepSimulation :: SimState -> Timestamp -> (OutputEvent [] MeterValues, SimState)
+stepSimulation :: SimState -> Timestamp -> (OutputEvent [] SessionOutput, SimState)
 stepSimulation (SimState {tick = t0}) ts
   | ts <= t0 = error "Can't simulate time backwards"
 stepSimulation
@@ -280,37 +327,28 @@ stepSimulation simState ts = return simState {tick = ts}
 data SetChargingProfile = SetChargingProfile
   { -- | transactionId for which the setpoint should be applied
     scpTransactionId :: !Word64,
-    scpCurrentOffered :: !Double
+    scpCurrentOffered :: !Double,
+    scpCallback :: !Text
   }
   deriving (Show, Eq)
 
 -- https://github.com/lexi-lambda/mtl-style-example/blob/master/library/MTLStyleExample/Interfaces.hs
 
-simulateChargingPoint :: Session -> InputEvent SetChargingProfile -> (OutputEvent [] MeterValues, ())
-simulateChargingPoint (Session (SessionConfiguration {connectorId, stationId, getInstantaneousCurrent}) sessionState) (InputEvent {ieTick}) = do
-  case sessionState of
-    Charging {transactionId, energyDelivered, currentOffered} -> do
-      tellNextSimulationStepAndEvent (minutes 2 <> seconds 14) $
-        MeterValues
-          { mvTransactionId = transactionId,
-            mvStationId = stationId,
-            mvConnectorId = connectorId,
-            mvTimestamp = ieTick,
-            mvCurrents = getInstantaneousCurrent ieTick sessionState,
-            mvOfferedCurrent = currentOffered,
-            mvEnergyDelivered = energyDelivered
-          }
-      return ()
-    _ -> tellNextSimulationStep $ minutes 1
-
-stepSessionState :: Session -> Duration -> InputEvent SetChargingProfile -> (OutputEvent [] MeterValues, SessionState)
-stepSessionState (Session (SessionConfiguration {charge, getInstantaneousCurrent, meterValuesPeriodicity, stationId, connectorId}) sessionState) stepSize (InputEvent {ieTick = now}) = do
+stepSessionState :: Session -> Duration -> InputEvent SetChargingProfile -> (OutputEvent [] SessionOutput, SessionState)
+stepSessionState (Session (SessionConfiguration {charge, getInstantaneousCurrent, meterValuesPeriodicity, stationId, connectorId}) sessionState) stepSize (InputEvent {ieTick = now, ieTrigger}) = do
+  -- First "integrate" the power
   sessionState <- charge sessionState stepSize now
-  let sampleDelay = milliseconds 100 -- delay between taking the MeterValues sample and making the output event
-      shortestDelayUntilNextSample = milliseconds 1 -- how long to wait before making new MeterValues sample if we are late
-      updateMeterValuesStateMachine :: SessionState -> (OutputEvent [] MeterValues, SessionState)
+  -- Update offered current for the next time step
+  sessionState <- case ieTrigger of
+    Just setChargingProfile -> do
+      tellNextSimulationStepAndEvent defaultNextSimulationStep $ AcceptSetChargingProfile $ scpCallback setChargingProfile
+      return $ sessionState {currentOffered = scpCurrentOffered setChargingProfile}
+    Nothing -> return sessionState
+  let updateMeterValuesStateMachine :: SessionState -> (OutputEvent [] SessionOutput, SessionState)
       updateMeterValuesStateMachine newState@(Charging {transactionId, currentOffered, energyDelivered, meterValuesStateMachine = (NextMeterValueSampleDue sampleTs)})
-        | now < sampleTs = return newState
+        | now < sampleTs = do
+            tellNextSimulationStep $ now `durationUntil` sampleTs
+            return newState
         | otherwise = do
             tellNextSimulationStep sampleDelay
             return $
@@ -335,10 +373,91 @@ stepSessionState (Session (SessionConfiguration {charge, getInstantaneousCurrent
                   if now < idealNextSample
                     then (idealNextSample, now `durationUntil` idealNextSample)
                     else (shortestDelayUntilNextSample `after` now, shortestDelayUntilNextSample)
-            tellNextSimulationStepAndEvent delayToNextSample sampledValue
+            tellNextSimulationStepAndEvent delayToNextSample $ SendMeterValues sampledValue
             return $ newState {meterValuesStateMachine = NextMeterValueSampleDue nextSampleDue}
         | otherwise = do
             tellNextSimulationStep $ now `durationUntil` (sampleDelay `after` sampleTs)
             return newState
       updateMeterValuesStateMachine newState = return newState
    in updateMeterValuesStateMachine sessionState
+  where
+    defaultNextSimulationStep = minutes 5
+    sampleDelay = milliseconds 100 -- delay between taking the MeterValues sample and making the output event
+    shortestDelayUntilNextSample = milliseconds 1 -- how long to wait before making new MeterValues sample if we are late
+
+stepSession :: Session -> Duration -> InputEvent SetChargingProfile -> (OutputEvent [] SessionOutput, Session)
+stepSession session@(Session sessionConfiguration _) duration inputEvent = (outputEvent, Session sessionConfiguration nextState)
+  where
+    (outputEvent, nextState) = stepSessionState session duration inputEvent
+
+simulate :: (Monad m) => (Session -> Duration -> InputEvent i -> (OutputEvent [] e, Session)) -> (e -> m ()) -> (SimState -> InputEvent i -> m ()) -> SimState -> InputEvent i -> m ()
+simulate
+  stepSession
+  deliverEvent
+  recurse
+  simState@(SimState {tick, session})
+  inputEvent@(InputEvent {ieTick = nextTick}) = do
+    let (OutputEvent {oeNext, oeEvent}, nextSession) = stepSession session (tick `durationUntil` nextTick) inputEvent
+    forM_ oeEvent deliverEvent
+    recurse (SimState {tick = nextTick, session = nextSession}) $ InputEvent {ieTick = oeNext `after` nextTick, ieTrigger = Nothing}
+
+fakeSimulation :: (Show i) => (Session -> Duration -> InputEvent i -> (OutputEvent [] e, Session)) -> Session -> Timestamp -> [(Duration, i)] -> Duration -> ([(Timestamp, Session)], [(Timestamp, e)])
+fakeSimulation stepper startSession t0 safeCalendar totalDuration =
+  let SimulationTrace sessionTrace outputTrace = fst $ goSimulation (SimState {tick = t0, session = startSession}) initialCalendar
+   in (fmap (\(SimState {tick, session}) -> (tick, session)) sessionTrace, outputTrace)
+  where
+    lastTimestamp = totalDuration `after` t0
+    initialCalendar =
+      reverse $
+        filter (\InputEvent {ieTick} -> ieTick <= lastTimestamp) $
+          snd $
+            foldl'
+              (\result@(t, as) (dur, ie) -> if t > lastTimestamp then result else let t1 = dur `after` t in (t1, InputEvent {ieTick = t1, ieTrigger = Just ie} : as))
+              (t0, [])
+              safeCalendar
+    -- goSimulation ::
+    --   (Show i) =>
+    --   -- | step SimState's session from input event's ieTick to ieTick + duration
+    --   (Session -> Duration -> InputEvent i -> (OutputEvent [] e, Session)) ->
+    --   -- | current simulator state (contains current timestamp)
+    --   SimState ->
+    --   -- | calendar of input events (known beforehand because this is a fake simulation)
+    --   [InputEvent i] ->
+    --   -- | end of simulation
+    --   Timestamp ->
+    --   (SimulationTrace e, ())
+    goSimulation startState@(SimState {tick, session}) calendar = do
+      tell $ SimulationTrace [startState] []
+      simulate stepper deliverEvent recurse startState calendarHead
+      where
+        defaultNextTimestamp = min lastTimestamp $ minutes 1 `after` tick
+        deliverEvent evt = tell $ SimulationTrace [] [(nextTimestamp, evt)]
+        (calendarHead@(InputEvent {ieTick = nextTimestamp}), calendarTail) = case calendar of
+          hd@(InputEvent {ieTick = hdTick}) : tl | hdTick <= defaultNextTimestamp -> (hd, tl)
+          _ -> (InputEvent {ieTick = defaultNextTimestamp, ieTrigger = Nothing}, calendar)
+        -- recurse ::
+        --   -- | next state = first state of the rest of the simulation
+        --   SimState ->
+        --   -- | next input event requested by the `stepper`, i.e. still to merge with calendarTail
+        --   InputEvent i -> m ()
+        recurse st ie@(InputEvent {ieTick = nextRequestedTimestamp})
+          | tick >= lastTimestamp = return ()
+          | otherwise = goSimulation st (mergeIntoCalendar calendarTail ie)
+        mergeIntoCalendar [] ie = [ie]
+        mergeIntoCalendar (ca@InputEvent {ieTick = caTick, ieTrigger = caTrigger} : ccaa) ie@InputEvent {ieTick, ieTrigger}
+          | caTick < ieTick = ca : mergeIntoCalendar ccaa ie
+          | ieTick < caTick = ie : ca : ccaa
+          | otherwise = case (caTrigger, ieTrigger) of
+              (Nothing, _) -> ie : ccaa
+              (_, Nothing) -> ca : ccaa
+              (Just cat, Just iet) -> ca : (mergeIntoCalendar ccaa $ InputEvent {ieTick = milliseconds 1 `after` ieTick, ieTrigger = ieTrigger})
+
+data SimulationTrace e = SimulationTrace [SimState] [(Timestamp, e)]
+  deriving (Show)
+
+instance Semigroup (SimulationTrace e) where
+  (SimulationTrace lftStates lftEvents) <> (SimulationTrace rgtStates rgtEvents) = SimulationTrace (lftStates <> rgtStates) $ lftEvents <> rgtEvents
+
+instance Monoid (SimulationTrace e) where
+  mempty = SimulationTrace [] []
+
