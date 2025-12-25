@@ -1,3 +1,4 @@
 * Introduction
 
-Simulate an EV charger talking the OCPP1.6 protocol and with a connected car consuming energy.
+Simulate an EV charger talking the OCPI 2.2.1 protocol and with a connected car consuming energy.
+
