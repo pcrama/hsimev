@@ -19,7 +19,7 @@ library
     exposed-modules:  MyLib, ChargingStation, Ocpi221
 
     -- Modules included in this library but not exported.
-    -- other-modules:
+    other-modules: OcpiStation
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

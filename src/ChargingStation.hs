@@ -13,13 +13,16 @@ module ChargingStation
     Session (..),
     SetChargingProfile (..),
     SimState (..),
-    seconds,
-    minutes,
-    durationUntil,
+    TransactionId (..),
     after,
+    clampingDurationUntil,
+    durationUntil,
+    minutes,
+    seconds,
+    secondsFrom,
     chargeEfficientlyUntil80Percent,
-    fakeSimulation,
     getInstantaneousCurrentMaxUntil80Percent,
+    fakeSimulation,
     stepSession,
   )
 where
@@ -117,7 +120,7 @@ data SessionState
         energyDelivered :: !Double,
         -- | how many [A] the EV should use
         currentOffered :: !Double,
-        transactionId :: !Word64,
+        transactionId :: !TransactionId,
         meterValuesStateMachine :: !MeterValuesStateMachine
       }
   | Finishing
@@ -130,8 +133,11 @@ data MeterValuesStateMachine
     Sampled !Timestamp !MeterValues
   deriving (Show, Eq)
 
+newtype TransactionId = TransactionId Text
+  deriving (Show, Eq, Ord)
+
 data MeterValues = MeterValues
-  { mvTransactionId :: !Word64,
+  { mvTransactionId :: !TransactionId,
     mvStationId :: !Text,
     mvConnectorId :: !Word8,
     mvTimestamp :: !Timestamp,
@@ -142,8 +148,7 @@ data MeterValues = MeterValues
   deriving (Show, Eq)
 
 data SessionOutput
-  = -- | transaction Id
-    StartCharge Word64
+  = StartCharge !Timestamp !TransactionId !Text !Word8
   | SendMeterValues MeterValues
   | AcceptSetChargingProfile Text
   | RejectSetChargingProfile Text
@@ -326,7 +331,7 @@ stepSimulation simState ts = return simState {tick = ts}
 
 data SetChargingProfile = SetChargingProfile
   { -- | transactionId for which the setpoint should be applied
-    scpTransactionId :: !Word64,
+    scpTransactionId :: !TransactionId,
     scpCurrentOffered :: !Double,
     scpCallback :: !Text
   }
