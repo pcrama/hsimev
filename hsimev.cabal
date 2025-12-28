@@ -16,10 +16,10 @@ copyright: 2025 Philippe Crama
 extra-source-files: README.org
 
 library
-    exposed-modules:  MyLib, ChargingStation, Ocpi221
+    exposed-modules:  ChargingStation, Ocpi221
 
     -- Modules included in this library but not exported.
-    other-modules: OcpiStation
+    other-modules:    OcpiStation
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -29,11 +29,11 @@ library
                     , bytestring ^>=0.12.2
                     , mtl ^>=2.3.2
                     , network-uri ^>=2.6.4.2
-                    , text ^>=1.2.5
+                    , text ^>=2.1.3
                     , time ^>=1.14
     hs-source-dirs:   src
     default-language: GHC2021
-    default-extensions: NamedFieldPuns, OverloadedStrings
+    default-extensions: DeriveGeneric, DeriveAnyClass, DerivingStrategies, NamedFieldPuns, NoGeneralizedNewtypeDeriving, OverloadedStrings
     ghc-options:
                       -- For details on warnings: https://downloads.haskell.org/~ghc/master/users-guide/using-warnings.html
                       -- This list taken from https://medium.com/mercury-bank/enable-all-the-warnings-a0517bc081c3
@@ -67,16 +67,16 @@ executable hsimev
     build-depends:
         base >=4.16.4.0 && <4.19,
         scotty ^>=0.22,
-        text ^>=1.2.5,
+        text,
         hsimev
 
     hs-source-dirs:   app
     default-language: Haskell2010
-    default-extensions: NamedFieldPuns, OverloadedStrings
+    default-extensions: DerivingStrategies, NamedFieldPuns, NoGeneralizedNewtypeDeriving, OverloadedStrings, Safe
 
 test-suite hsimev-test
     default-language: Haskell2010
-    default-extensions: NamedFieldPuns, OverloadedStrings
+    default-extensions: DerivingStrategies, NamedFieldPuns, NoGeneralizedNewtypeDeriving, OverloadedStrings
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          MyLibTest.hs

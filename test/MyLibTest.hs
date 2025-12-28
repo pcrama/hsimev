@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 module Main (main) where
 
 import ChargingStation

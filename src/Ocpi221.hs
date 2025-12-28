@@ -1,5 +1,4 @@
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE Trustworthy #-}
 
 -- | Minimal implementation: OCPI 2.2.1 standard is *NOT* a goal, just enough
 -- adherence to interoperate for the narrow use-case of the simulations I want
@@ -17,16 +16,24 @@ module Ocpi221
     errorResponseIO,
     putSessionRequest,
     putSessionRequestIO,
+    fromWhTo_kWh,
   )
 where
 
 import Control.Monad.Trans (MonadIO, liftIO)
-import Data.Aeson hiding (Result (..))
-import qualified Data.ByteString.Lazy as BS
-import qualified Data.Text as T
-import Data.Time.Clock
+import Data.Aeson
+  ( FromJSON,
+    KeyValue ((.=)),
+    ToJSON (toJSON),
+    encode,
+    object,
+  )
+import Data.ByteString.Lazy qualified as BS
+import Data.Kind (Type)
+import Data.Text qualified as T
+import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
-import GHC.Generics
+import GHC.Generics (Generic)
 import Network.HTTP
   ( HeaderName (..),
     Request (..),
@@ -38,15 +45,23 @@ import Network.HTTP
   )
 import Network.Stream (ConnError (..), Result)
 import Network.URI (parseURI)
+import Prelude
+
+-- | Return kWh rounded to nearest Wh
+fromWhTo_kWh :: Double -> Double
+fromWhTo_kWh = (* 0.001) . fromIntegral @Int . round
 
 -- | From https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_set_charging_profile_object
+type SetChargingProfile :: Type
 data SetChargingProfile = SetChargingProfile
   { charging_profile :: ChargingProfile,
     response_url :: T.Text
   }
-  deriving (Show, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToJSON, FromJSON)
+  deriving stock (Show, Generic)
 
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_charging_profile_class
+type ChargingProfile :: Type
 data ChargingProfile = ChargingProfile
   { -- | Starting point of an absolute profile. If absent the profile will be
     -- | relative to start of charging.
@@ -67,9 +82,11 @@ data ChargingProfile = ChargingProfile
     -- | current usage over time.
     charging_profile_period :: [ChargingProfilePeriod]
   }
-  deriving (Show, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToJSON, FromJSON)
+  deriving stock (Show, Generic)
 
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_charging_profile_period_class
+type ChargingProfilePeriod :: Type
 data ChargingProfilePeriod = ChargingProfilePeriod
   { -- | Start of the period, in seconds from the start of profile. The value
     -- | of StartPeriod also defines the stop time of the previous period.
@@ -79,9 +96,11 @@ data ChargingProfilePeriod = ChargingProfilePeriod
     -- | most one digit fraction (e.g. 8.1).
     limit :: Double
   }
-  deriving (Show, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToJSON, FromJSON)
+  deriving stock (Show, Generic)
 
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_response_object
+type ChargingProfileResponse :: Type
 data ChargingProfileResponse = ChargingProfileResponse
   { -- | Response from the CPO on the ChargingProfile request: (ACCEPTED |
     -- NOT_SUPPORTED | REJECTED | TOO_OFTEN | UNKNOWN_SESSION)
@@ -91,16 +110,18 @@ data ChargingProfileResponse = ChargingProfileResponse
     -- message might never be sent.
     timeout :: Int
   }
-  deriving (Show, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToJSON, FromJSON)
+  deriving stock (Show, Generic)
 
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/transport_and_format.asciidoc#117-response-format
+type ResponseFormat :: Type -> Type
 data ResponseFormat a = ResponseFormat
   { data_ :: a,
     status_code :: Int,
     status_message :: Maybe T.Text,
     timestamp :: T.Text
   }
-  deriving (Show, Eq)
+  deriving stock (Show, Eq)
 
 instance (ToJSON a) => ToJSON (ResponseFormat a) where
   toJSON (ResponseFormat {data_, status_code, status_message, timestamp}) = object $ mkAttrValList status_message
@@ -134,6 +155,7 @@ getCurrentTimeAsRFC3339 = do
   return $ val <> "Z"
 
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_sessions.asciidoc#mod_sessions_session_object
+type Session :: Type
 data Session = Session
   { -- | ISO-3166 alpha-2 country code of the MSP that 'owns' this Token.
     ocpi_session_country_code :: T.Text,
@@ -183,9 +205,9 @@ data Session = Session
     -- | Timestamp when this Session was last updated (or created).
     ocpi_session_last_updated :: T.Text
   }
-  deriving (Show, Eq)
+  deriving stock (Show, Eq)
 
-instance ToJSON (Session) where
+instance ToJSON Session where
   toJSON
     ( Session
         { ocpi_session_country_code,
@@ -227,6 +249,7 @@ instance ToJSON (Session) where
           ]
 
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_cdrs.asciidoc#mod_cdrs_cdr_token_object
+type CdrToken :: Type
 data CdrToken = CdrToken
   { -- | ISO-3166 alpha-2 country code of the MSP that 'owns' this Token.
     ocpi_cdr_country_code :: T.Text,
@@ -245,7 +268,7 @@ data CdrToken = CdrToken
     -- specification for eMA ID from "eMI3 standard version V1.0"
     ocpi_cdr_contract_id :: T.Text
   }
-  deriving (Show, Eq)
+  deriving stock (Show, Eq)
 
 instance ToJSON CdrToken where
   toJSON
@@ -273,7 +296,7 @@ putSessionRequest sess = do
   return
     $ replaceHeader HdrContentType "application/json"
       . replaceHeader HdrContentLength (show $ BS.length body)
-    $ ((mkRequest PUT url) :: Request BS.ByteString) {rqBody = body}
+    $ (mkRequest PUT url :: Request BS.ByteString) {rqBody = body}
 
 putSessionRequestIO :: (MonadIO m) => Session -> m (Result (Response BS.ByteString))
 putSessionRequestIO sess = do
