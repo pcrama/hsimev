@@ -1,11 +1,22 @@
 {-# LANGUAGE Trustworthy #-}
+
 module Main (main) where
 
 import ChargingStation
 import Control.Monad (forM_)
-import Control.Monad.Writer (MonadWriter)
+import Control.Monad.Writer (MonadWriter, tell)
 import Control.Monad.Writer.Strict (runWriter, runWriterT)
+import Data.List (foldl')
 import Data.Text (Text)
+import Data.Time.Calendar (Day (..))
+import Data.Time.Clock
+  ( UTCTime (..),
+    addUTCTime,
+    diffUTCTime,
+    getCurrentTime,
+    nominalDiffTimeToSeconds,
+    secondsToNominalDiffTime,
+  )
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
 
@@ -32,7 +43,11 @@ iterateWriter f n a = go ([], [a]) n a
 
 main :: IO ()
 main = defaultMain $ do
-  testGroup "Manually checked" [manuallyCheckedComputationTests, fakeSimulationTest]
+  testGroup
+    "CharginStation tests"
+    [ testGroup "Manually checked" [manuallyCheckedComputationTests, fakeSimulationTest],
+      timeConversionFunctionTests
+    ]
 
 manuallyCheckedComputationTests :: TestTree
 manuallyCheckedComputationTests =
@@ -92,6 +107,66 @@ manuallyCheckedComputationTests =
         iterateWriter stepByMinute 25 $
           SimState {tick = startTime, session = Session sessConf sessState}
 
+fakeSimulation :: (Session -> Duration -> InputEvent i -> (OutputEvent [] e, Session)) -> Session -> Timestamp -> [(Duration, i)] -> Duration -> ([(Timestamp, Session)], [(Timestamp, e)])
+fakeSimulation stepper startSession t0 safeCalendar totalDuration =
+  let SimulationTrace sessionTrace outputTrace = fst $ goSimulation (SimState {tick = t0, session = startSession}) initialCalendar
+   in (fmap (\(SimState {tick, session}) -> (tick, session)) sessionTrace, outputTrace)
+  where
+    lastTimestamp = totalDuration `after` t0
+    initialCalendar =
+      reverse $
+        filter (\InputEvent {ieTick} -> ieTick <= lastTimestamp) $
+          snd $
+            foldl'
+              (\result@(t, as) (dur, ie) -> if t > lastTimestamp then result else let t1 = dur `after` t in (t1, InputEvent {ieTick = t1, ieTrigger = Just ie} : as))
+              (t0, [])
+              safeCalendar
+    -- goSimulation ::
+    --   (Show i) =>
+    --   -- | step SimState's session from input event's ieTick to ieTick + duration
+    --   (Session -> Duration -> InputEvent i -> (OutputEvent [] e, Session)) ->
+    --   -- | current simulator state (contains current timestamp)
+    --   SimState ->
+    --   -- | calendar of input events (known beforehand because this is a fake simulation)
+    --   [InputEvent i] ->
+    --   -- | end of simulation
+    --   Timestamp ->
+    --   (SimulationTrace e, ())
+    goSimulation startState@(SimState {tick}) calendar = do
+      tell $ SimulationTrace [startState] []
+      simulate stepper deliverEvent recurse startState calendarHead
+      where
+        defaultNextTimestamp = min lastTimestamp $ minutes 1 `after` tick
+        deliverEvent evt = tell $ SimulationTrace [] [(nextTimestamp, evt)]
+        (calendarHead@(InputEvent {ieTick = nextTimestamp}), calendarTail) = case calendar of
+          hd@(InputEvent {ieTick = hdTick}) : tl | hdTick <= defaultNextTimestamp -> (hd, tl)
+          _ -> (InputEvent {ieTick = defaultNextTimestamp, ieTrigger = Nothing}, calendar)
+        -- recurse ::
+        --   -- | next state = first state of the rest of the simulation
+        --   SimState ->
+        --   -- | next input event requested by the `stepper`, i.e. still to merge with calendarTail
+        --   InputEvent i -> m ()
+        recurse st ie
+          | tick >= lastTimestamp = return ()
+          | otherwise = goSimulation st (mergeIntoCalendar calendarTail ie)
+        mergeIntoCalendar [] ie = [ie]
+        mergeIntoCalendar (ca@InputEvent {ieTick = caTick, ieTrigger = caTrigger} : ccaa) ie@InputEvent {ieTick, ieTrigger}
+          | caTick < ieTick = ca : mergeIntoCalendar ccaa ie
+          | ieTick < caTick = ie : ca : ccaa
+          | otherwise = case (caTrigger, ieTrigger) of
+              (Nothing, _) -> ie : ccaa
+              (_, Nothing) -> ca : ccaa
+              (Just _, Just _) -> ca : (mergeIntoCalendar ccaa $ InputEvent {ieTick = milliseconds 1 `after` ieTick, ieTrigger = ieTrigger})
+
+data SimulationTrace e = SimulationTrace [SimState] [(Timestamp, e)]
+  deriving stock (Show)
+
+instance Semigroup (SimulationTrace e) where
+  (SimulationTrace lftStates lftEvents) <> (SimulationTrace rgtStates rgtEvents) = SimulationTrace (lftStates <> rgtStates) $ lftEvents <> rgtEvents
+
+instance Monoid (SimulationTrace e) where
+  mempty = SimulationTrace [] []
+
 fakeSimulationTest :: TestTree
 fakeSimulationTest =
   testGroup "simulation traces" $
@@ -121,8 +196,8 @@ fakeSimulationTest =
             stepSession
             (Session sessConf sessState)
             startTime
-            [ (minutes 1 <> seconds 2, SetChargingProfile (TransactionId "4321234") 10 "cb10"),
-              (minutes 4 <> seconds 10, SetChargingProfile (TransactionId "4321234") 8.5 "cb8p5")
+            [ (minutes 1 <> seconds 2, SimulationSetChargingProfile (TransactionId "4321234") 10 "cb10"),
+              (minutes 4 <> seconds 10, SimulationSetChargingProfile (TransactionId "4321234") 8.5 "cb8p5")
             ]
             $ minutes 9 <> seconds 54
         (expectedSessionTrace, expectedEventTrace) =
@@ -203,3 +278,22 @@ fakeSimulationTest =
                  ) <-
                  zip eventTrace expectedEventTrace
              ]
+
+timeConversionFunctionTests :: TestTree
+timeConversionFunctionTests =
+  testGroup
+    "Time conversion functions"
+    [ testCase "simulationTimeToUTCTime forward" $
+        simulationTimeToUTCTime (Timestamp 123) (UTCTime {utctDay = ModifiedJulianDay 666, utctDayTime = 0}) (Timestamp 86400123)
+          @?= UTCTime {utctDay = ModifiedJulianDay 667, utctDayTime = 0},
+      testCase "simulationTimeToUTCTime backward" $
+        simulationTimeToUTCTime (Timestamp 172800789) (UTCTime {utctDay = ModifiedJulianDay 668, utctDayTime = 0}) (Timestamp 86400789)
+          @?= UTCTime {utctDay = ModifiedJulianDay 667, utctDayTime = 0},
+      testCase "utcTimeToSimulationTime forward" $
+        utcTimeToSimulationTime (Timestamp 123) (UTCTime {utctDay = ModifiedJulianDay 666, utctDayTime = 0}) (UTCTime {utctDay = ModifiedJulianDay 667, utctDayTime = 0})
+          @?= Timestamp 86400123,
+      testCase
+        "utcTimeToSimulationTime backward"
+        $ utcTimeToSimulationTime (Timestamp 172800456) (UTCTime {utctDay = ModifiedJulianDay 666, utctDayTime = 0}) (UTCTime {utctDay = ModifiedJulianDay 665, utctDayTime = 0})
+          @?= Timestamp 86400456
+    ]

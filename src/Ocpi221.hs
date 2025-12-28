@@ -8,12 +8,14 @@ module Ocpi221
     ChargingProfile (..),
     ChargingProfilePeriod (..),
     ChargingProfileResponse (..),
+    ChargingProfileResultType (..),
     Session (..),
     CdrToken (..),
     successResponse,
     successResponseIO,
     errorResponse,
     errorResponseIO,
+    postCallbackRequestIO,
     putSessionRequest,
     putSessionRequestIO,
     fromWhTo_kWh,
@@ -64,22 +66,22 @@ data SetChargingProfile = SetChargingProfile
 type ChargingProfile :: Type
 data ChargingProfile = ChargingProfile
   { -- | Starting point of an absolute profile. If absent the profile will be
-    -- | relative to start of charging.
+    -- relative to start of charging.
     start_date_time :: Maybe T.Text,
     -- | Duration of the charging profile in seconds. If the duration is left
-    -- | empty, the last period will continue indefinitely or until end of the
-    -- | transaction in case start_date_time is absent.
+    -- empty, the last period will continue indefinitely or until end of the
+    -- transaction in case start_date_time is absent.
     duration :: Maybe Int,
     -- | "W" or "A" but I'm not going to create a data type with those constructors...
     charging_rate_unit :: T.Text,
     -- | Minimum charging rate supported by the EV. The unit of measure is
-    -- | defined by the chargingRateUnit. This parameter is intended to be
-    -- | used by a local smart charging algorithm to optimize the power
-    -- | allocation for in the case a charging process is inefficient at lower
-    -- | charging rates. Accepts at most one digit fraction (e.g. 8.1)
+    -- defined by the chargingRateUnit. This parameter is intended to be
+    -- used by a local smart charging algorithm to optimize the power
+    -- allocation for in the case a charging process is inefficient at lower
+    -- charging rates. Accepts at most one digit fraction (e.g. 8.1)
     min_charging_rate :: Maybe Double,
     -- | List of ChargingProfilePeriod elements defining maximum power or
-    -- | current usage over time.
+    -- current usage over time.
     charging_profile_period :: [ChargingProfilePeriod]
   }
   deriving anyclass (ToJSON, FromJSON)
@@ -89,11 +91,11 @@ data ChargingProfile = ChargingProfile
 type ChargingProfilePeriod :: Type
 data ChargingProfilePeriod = ChargingProfilePeriod
   { -- | Start of the period, in seconds from the start of profile. The value
-    -- | of StartPeriod also defines the stop time of the previous period.
+    -- of StartPeriod also defines the stop time of the previous period.
     start_period :: Int,
     -- | Charging rate limit during the profile period, in the applicable
-    -- | chargingRateUnit, for example in Amperes (A) or Watts (W). Accepts at
-    -- | most one digit fraction (e.g. 8.1).
+    -- chargingRateUnit, for example in Amperes (A) or Watts (W). Accepts at
+    -- most one digit fraction (e.g. 8.1).
     limit :: Double
   }
   deriving anyclass (ToJSON, FromJSON)
@@ -287,6 +289,32 @@ instance ToJSON CdrToken where
           "token_type" .= toJSON ocpi_cdr_token_type,
           "contract_id" .= toJSON ocpi_cdr_contract_id
         ]
+
+-- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#166-chargingprofileresulttype-enum
+type ChargingProfileResultType :: Type
+data ChargingProfileResultType = CprtAccepted | CprtRejected | CprtUnknown
+  deriving stock (Show, Eq)
+
+instance ToJSON ChargingProfileResultType where
+  toJSON CprtAccepted = "ACCEPTED"
+  toJSON CprtRejected = "REJECTED"
+  toJSON CprtUnknown = "UNKNOWN"
+
+postCallbackRequestIO :: (MonadIO m) => T.Text -> ChargingProfileResultType -> m (Result (Response BS.ByteString))
+postCallbackRequestIO callbackUrl cprt = do
+  liftIO $ case parseURI $ T.unpack callbackUrl of
+    Nothing -> do
+      let msg = T.unpack $ "Unable to build HTTP POST request for callbackUrl " <> callbackUrl
+      putStrLn msg
+      return $ Left $ ErrorMisc msg
+    Just url -> do
+      body <- encode <$> successResponseIO cprt
+      let req =
+            replaceHeader HdrContentType "application/json"
+              . replaceHeader HdrContentLength (show $ BS.length body)
+              $ (mkRequest POST url :: Request BS.ByteString) {rqBody = body}
+      putStrLn $ "Making HTTP request " <> show req <> "with body " <> show (rqBody req)
+      simpleHTTP req
 
 putSessionRequest :: Session -> Maybe (Request BS.ByteString)
 putSessionRequest sess = do
