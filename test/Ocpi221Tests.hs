@@ -101,7 +101,7 @@ ocpi221PutSessionRequest =
             CdrToken
               { ocpi_cdr_country_code = "NL",
                 ocpi_cdr_party_id = "LMS",
-                ocpi_cdr_id = "cdr_ID",
+                ocpi_cdr_uid = "cdr_ID",
                 ocpi_cdr_token_type = "RFID",
                 ocpi_cdr_contract_id = "contract_id"
               },

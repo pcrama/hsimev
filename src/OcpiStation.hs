@@ -57,7 +57,7 @@ deliverSessionOutputIO config so = case so of
             O.CdrToken
               { O.ocpi_cdr_country_code = "NL",
                 O.ocpi_cdr_party_id = "LMS",
-                O.ocpi_cdr_id = "cdr_ID",
+                O.ocpi_cdr_uid = "cdr_UID",
                 O.ocpi_cdr_token_type = "RFID",
                 O.ocpi_cdr_contract_id = "contract_id"
               },
@@ -91,7 +91,7 @@ deliverSessionOutputIO config so = case so of
               O.CdrToken
                 { O.ocpi_cdr_country_code = "NL",
                   O.ocpi_cdr_party_id = "LMS",
-                  O.ocpi_cdr_id = "cdr_ID",
+                  O.ocpi_cdr_uid = "cdr_ID",
                   O.ocpi_cdr_token_type = "RFID",
                   O.ocpi_cdr_contract_id = "contract_id"
                 },

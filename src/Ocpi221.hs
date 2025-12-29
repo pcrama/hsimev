@@ -66,7 +66,8 @@ data SetChargingProfile = SetChargingProfile
   deriving anyclass (ToJSON, FromJSON)
   deriving stock (Show, Generic)
 
--- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_charging_profile_class
+-- | ChargingProfile comes from OCPI 2.2.1
+-- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_charging_profile_class
 type ChargingProfile :: Type
 data ChargingProfile = ChargingProfile
   { -- | Starting point of an absolute profile. If absent the profile will be
@@ -91,7 +92,8 @@ data ChargingProfile = ChargingProfile
   deriving anyclass (ToJSON, FromJSON)
   deriving stock (Show, Generic)
 
--- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_charging_profile_period_class
+-- | ChargingProfilePeriod comes from OCPI 2.2.1
+-- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_charging_profile_period_class
 type ChargingProfilePeriod :: Type
 data ChargingProfilePeriod = ChargingProfilePeriod
   { -- | Start of the period, in seconds from the start of profile. The value
@@ -105,7 +107,8 @@ data ChargingProfilePeriod = ChargingProfilePeriod
   deriving anyclass (ToJSON, FromJSON)
   deriving stock (Show, Generic)
 
--- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_response_object
+-- | ChargingProfileResponse comes from OCPI 2.2.1
+-- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_charging_profiles.asciidoc#mod_charging_profiles_response_object
 type ChargingProfileResponse :: Type
 data ChargingProfileResponse = ChargingProfileResponse
   { -- | Response from the CPO on the ChargingProfile request: (ACCEPTED |
@@ -151,8 +154,8 @@ withTimestamp :: (MonadIO m) => (T.Text -> v) -> m v
 withTimestamp = (<$> liftIO getCurrentTimeAsRFC3339)
 
 -- | Source - https://stackoverflow.com/a/73646742 and https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/types.asciidoc#types_datetime_type
--- | Posted by beyarkay, modified by community. See post 'Timeline' for change history
--- | Retrieved 2025-12-25, License - CC BY-SA 4.0
+-- Posted by beyarkay, modified by community. See post 'Timeline' for change history
+-- Retrieved 2025-12-25, License - CC BY-SA 4.0
 getCurrentTimeAsRFC3339 :: IO T.Text
 getCurrentTimeAsRFC3339 = do
   t <- getCurrentTime
@@ -266,7 +269,7 @@ data CdrToken = CdrToken
     -- this token.  Currently, in most cases: type=RFID, this is the RFID hidden
     -- ID as read by the RFID reader, but that is not a requirement.  If this is
     -- a type=APP_USER Token, it will be a unique, by the eMSP, generated ID.
-    ocpi_cdr_id :: T.Text,
+    ocpi_cdr_uid :: T.Text,
     -- | AD_HOC_USER | APP_USER | OTHER | RFID
     ocpi_cdr_token_type :: T.Text,
     -- | Uniquely identifies the EV driver contract token within the eMSP’s
@@ -281,7 +284,7 @@ instance ToJSON CdrToken where
     ( CdrToken
         { ocpi_cdr_country_code,
           ocpi_cdr_party_id,
-          ocpi_cdr_id,
+          ocpi_cdr_uid,
           ocpi_cdr_token_type,
           ocpi_cdr_contract_id
         }
@@ -289,7 +292,7 @@ instance ToJSON CdrToken where
       object
         [ "country_code" .= toJSON ocpi_cdr_country_code,
           "party_id" .= toJSON ocpi_cdr_party_id,
-          "id" .= toJSON ocpi_cdr_id,
+          "uid" .= toJSON ocpi_cdr_uid,
           "token_type" .= toJSON ocpi_cdr_token_type,
           "contract_id" .= toJSON ocpi_cdr_contract_id
         ]
