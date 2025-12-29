@@ -1,7 +1,8 @@
 {-# LANGUAGE Safe #-}
 
 module OcpiStation
-  ( deliverSessionOutputIO,
+  ( Config (..),
+    deliverSessionOutputIO,
     parseSetChargingProfile,
     startSimulation,
   )
@@ -9,9 +10,9 @@ where
 
 import ChargingStation
 import Control.Concurrent (MVar, takeMVar)
-import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Functor (void)
+import Data.Kind (Type)
 import Data.Text (Text, pack)
 import Data.Time.Calendar (Day (..))
 import Data.Time.Clock (UTCTime (..), addUTCTime, getCurrentTime)
@@ -20,6 +21,10 @@ import Ocpi221 qualified as O
 import System.Timeout qualified as SysTimeout
 import Prelude
 
+type Config :: Type
+data Config = Config {scspBaseUrl :: Text}
+  deriving stock (Show)
+
 encodeSimulationTimestampForOcpi :: Timestamp -> Text
 encodeSimulationTimestampForOcpi ts = formatted <> "Z"
   where
@@ -27,8 +32,8 @@ encodeSimulationTimestampForOcpi ts = formatted <> "Z"
     utct = addUTCTime (realToFrac $ secondsFrom $ clampingDurationUntil (Timestamp 0) ts) utct0
     formatted = pack $ take 23 $ formatTime defaultTimeLocale "%FT%T%Q" utct
 
-deliverSessionOutputIO :: (MonadIO m) => SessionOutput -> m ()
-deliverSessionOutputIO so = case so of
+deliverSessionOutputIO :: (MonadIO m) => Config -> SessionOutput -> m ()
+deliverSessionOutputIO config so = case so of
   StartCharge timestamp transactionId stationId connectorId -> putSession $ makeStartSession timestamp transactionId stationId connectorId
   SendMeterValues meterValues -> putSession $ makeMeterValuesSession meterValues
   AcceptSetChargingProfile cbUrl -> putCallback cbUrl O.CprtAccepted
@@ -38,7 +43,7 @@ deliverSessionOutputIO so = case so of
     let session = makeMeterValuesSession meterValues
      in putSession $ session {O.ocpi_session_status = "COMPLETED", O.ocpi_session_end_date_time = pure $ O.ocpi_session_last_updated session}
   where
-    putSession = void . O.putSessionRequestIO
+    putSession = void . O.putSessionRequestIO (scspBaseUrl config)
     putCallback cpUrl cprt = void $ O.postCallbackRequestIO cpUrl cprt
     makeStartSession timestamp (TransactionId transactionId) stationId connectorId =
       O.Session
@@ -148,21 +153,22 @@ getNextEvent wallClockToTimestamp ch deadline maxWaitTime defaultEvent = do
       return $ InputEvent {ieTick = min now deadline, ieTrigger = Just evt}
     Nothing -> return defaultEvent
 
-simulator :: (MonadIO m) => (SimState -> InputEvent SimulationSetChargingProfile -> m ()) -> SimState -> InputEvent SimulationSetChargingProfile -> m ()
-simulator = simulate stepSession deliverSessionOutputIO
+simulator :: (MonadIO m) => Config -> (SimState -> InputEvent SimulationSetChargingProfile -> m ()) -> SimState -> InputEvent SimulationSetChargingProfile -> m ()
+simulator config = simulate stepSession (deliverSessionOutputIO config)
 
-startSimulation :: (MonadIO m) => MVar SimulationSetChargingProfile -> Session -> Timestamp -> Duration -> m ()
-startSimulation eventChannel session t0 duration = do
+startSimulation :: (MonadIO m) => Config -> MVar SimulationSetChargingProfile -> Session -> Timestamp -> Duration -> m ()
+startSimulation config eventChannel session t0 duration = do
   refTime <- liftIO getCurrentTime -- refTime [wall clock time] corresponds to t0 [simulation time]
   let wallClockToTimestamp = utcTimeToSimulationTime t0 refTime
-  let recurse = recurseSimulation wallClockToTimestamp (duration `after` t0) eventChannel
   simulator
-    recurse
+    config
+    (recurseSimulation config wallClockToTimestamp (duration `after` t0) eventChannel)
     (SimState {tick = t0, session = session})
     (InputEvent {ieTick = milliseconds 1 `after` t0, ieTrigger = Nothing})
 
 recurseSimulation ::
   (MonadIO m) =>
+  Config ->
   -- | Conversion function from current (wall clock time) to simulation timestamps
   (UTCTime -> Timestamp) ->
   -- | When is simulation finished?
@@ -172,7 +178,7 @@ recurseSimulation ::
   SimState ->
   InputEvent SimulationSetChargingProfile ->
   m ()
-recurseSimulation wallClockToTimestamp finalTimestamp eventChannel simState evt@(InputEvent {ieTick, ieTrigger}) = do
+recurseSimulation config wallClockToTimestamp finalTimestamp eventChannel simState evt@(InputEvent {ieTick, ieTrigger}) = do
   now <- wallClockToTimestamp <$> liftIO getCurrentTime
   -- When waiting for an external event, avoid the situation where the
   -- external event falls exactly at the same time as evt's ieTrigger and
@@ -181,9 +187,9 @@ recurseSimulation wallClockToTimestamp finalTimestamp eventChannel simState evt@
         Just _ -> milliseconds 1 `before` ieTick
         Nothing -> ieTick
   liftIO $ putStrLn $ "now=" <> show now <> ", externalEventDeadline=" <> show externalEventDeadline <> ", simState=" <> show simState <> ", evt=" <> show evt
-  let continueSimulation = simulator (recurseSimulation wallClockToTimestamp finalTimestamp eventChannel) simState
+  let continueSimulation = simulator config (recurseSimulation config wallClockToTimestamp finalTimestamp eventChannel) simState
   if now < finalTimestamp
     then case now `maybeDurationUntil` min externalEventDeadline finalTimestamp of
-           Just duration -> getNextEvent wallClockToTimestamp eventChannel (duration `after` now) duration evt >>= continueSimulation
-           Nothing -> continueSimulation evt
+      Just duration -> getNextEvent wallClockToTimestamp eventChannel (duration `after` now) duration evt >>= continueSimulation
+      Nothing -> continueSimulation evt
     else liftIO $ putStrLn $ "Simulation done at " <> show now

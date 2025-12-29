@@ -1,20 +1,22 @@
 {-# LANGUAGE Trustworthy #-}
 
-import Prelude
 import ChargingStation
+import Config qualified
 import Control.Concurrent (MVar, forkIO, newEmptyMVar, putMVar)
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor (void)
 import Ocpi221 qualified as O
-import OcpiStation
+import OcpiStation qualified as OS
+import Options.Applicative
 import Web.Scotty (json, jsonData, pathParam, put, scotty)
+import Prelude
 
-apiServer :: MVar SimulationSetChargingProfile -> IO ()
-apiServer ch = scotty 3000 $ do
+apiServer :: Int -> MVar SimulationSetChargingProfile -> IO ()
+apiServer port ch = scotty port $ do
   put "/ocpi/2.2/chargingprofiles/:session_id" $ do
     sessionId <- pathParam "session_id"
     setChargingProfile <- jsonData
-    case parseSetChargingProfile (TransactionId sessionId) setChargingProfile of
+    case OS.parseSetChargingProfile (TransactionId sessionId) setChargingProfile of
       Just simSetChgProf -> do
         liftIO $ print simSetChgProf
         liftIO $ putMVar ch simSetChgProf
@@ -25,11 +27,26 @@ apiServer ch = scotty 3000 $ do
         json r
 
 main :: IO ()
-main = do
+main = execParser opts >>= runSimulationAndApi
+  where
+    opts =
+      info
+        (Config.simulationServerConfig <**> helper)
+        ( fullDesc
+            <> progDesc
+              "Simulate charging points and their sessions forwarding \
+              \their information to an SCSP & accepting SetChargingProfile \
+              \from the SCSP."
+            <> header "hsimev - simulator for SCSP development"
+        )
+
+runSimulationAndApi :: Config.Config -> IO ()
+runSimulationAndApi config = do
   ch <- newEmptyMVar
-  putStrLn "Forking simulation"
-  void $ forkIO $ startSimulation ch (Session sessConf sessState) startTime $ minutes 20
-  apiServer ch
+  putStrLn $ "Forking API server on port " <> show (Config.port config)
+  putStrLn $ "Starting simulation with config " <> show simConfig
+  void $ forkIO $ apiServer (Config.port config) ch
+  OS.startSimulation simConfig ch (Session sessConf sessState) startTime $ seconds $ Config.simulationDuration config
   where
     startTime = Timestamp 0
     meterValuesPeriodicity = seconds 60
@@ -52,3 +69,4 @@ main = do
           transactionId = TransactionId "4321234",
           meterValuesStateMachine = NextMeterValueSampleDue $ meterValuesPeriodicity `after` startTime
         }
+    simConfig = OS.Config {OS.scspBaseUrl = Config.scspBaseUrl config}

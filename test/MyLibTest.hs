@@ -17,6 +17,7 @@ import Data.Time.Clock
     nominalDiffTimeToSeconds,
     secondsToNominalDiffTime,
   )
+import Ocpi221Tests
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
 
@@ -44,9 +45,13 @@ iterateWriter f n a = go ([], [a]) n a
 main :: IO ()
 main = defaultMain $ do
   testGroup
-    "CharginStation tests"
-    [ testGroup "Manually checked" [manuallyCheckedComputationTests, fakeSimulationTest],
-      timeConversionFunctionTests
+    "All tests"
+    [ testGroup
+        "CharginStation tests"
+        [ testGroup "Manually checked" [manuallyCheckedComputationTests, fakeSimulationTest],
+          timeConversionFunctionTests
+        ],
+      testGroup "Ocpi221 tests" ocpi221Tests
     ]
 
 manuallyCheckedComputationTests :: TestTree
