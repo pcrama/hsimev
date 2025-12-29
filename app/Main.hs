@@ -65,8 +65,8 @@ runSimulationAndApi config = do
           charge = chargeEfficientlyUntil80Percent sessConf,
           getInstantaneousCurrent = getInstantaneousCurrentMaxUntil80Percent 16 0.0 sessConf,
           phases = RST,
-          stationId = "id_station",
-          connectorId = 2,
+          stationId = Config.stationId config,
+          connectorId = Config.connectorId config,
           meterValuesPeriodicity = meterValuesPeriodicity
         }
     sessState =
@@ -74,7 +74,7 @@ runSimulationAndApi config = do
         { batteryLevel = 16000.0,
           energyDelivered = 0.0,
           currentOffered = 11.5,
-          transactionId = TransactionId "4321234",
+          transactionId = TransactionId $ Config.transactionId config,
           startDateTime = startTime,
           meterValuesStateMachine = NextMeterValueSampleDue $ meterValuesPeriodicity `after` startTime
         }

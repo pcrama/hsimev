@@ -156,7 +156,7 @@ withTimestamp :: (MonadIO m) => (T.Text -> v) -> m v
 withTimestamp = (<$> liftIO getCurrentTimeAsRFC3339)
 
 -- | Source - https://stackoverflow.com/a/73646742 and https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/types.asciidoc#types_datetime_type
--- Posted by beyarkay, modified by community. See post 'Timeline' for change history
+-- Posted by beyarkay, modified by community. See post \'Timeline\' for change history
 -- Retrieved 2025-12-25, License - CC BY-SA 4.0
 encodeTimeAsRFC3339 :: UTCTime -> T.Text
 encodeTimeAsRFC3339 t =
@@ -170,9 +170,9 @@ getCurrentTimeAsRFC3339 = encodeTimeAsRFC3339 <$> getCurrentTime
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_sessions.asciidoc#mod_sessions_session_object
 type Session :: Type
 data Session = Session
-  { -- | ISO-3166 alpha-2 country code of the MSP that 'owns' this Token.
+  { -- | ISO-3166 alpha-2 country code of the MSP that \'owns\' this Token.
     ocpi_session_country_code :: T.Text,
-    -- | ID of the eMSP that 'owns' this Token (following the ISO-15118 standard).
+    -- | ID of the eMSP that \'owns\' this Token (following the ISO-15118 standard).
     ocpi_session_party_id :: T.Text,
     -- | The unique id that identifies the charging session in the CPO platform.
     ocpi_session_id :: T.Text,
@@ -264,9 +264,9 @@ instance ToJSON Session where
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_cdrs.asciidoc#mod_cdrs_cdr_token_object
 type CdrToken :: Type
 data CdrToken = CdrToken
-  { -- | ISO-3166 alpha-2 country code of the MSP that 'owns' this Token.
+  { -- | ISO-3166 alpha-2 country code of the MSP that \'owns\' this Token.
     ocpi_cdr_country_code :: T.Text,
-    -- | ID of the eMSP that 'owns' this Token (following the ISO-15118 standard).
+    -- | ID of the eMSP that \'owns\' this Token (following the ISO-15118 standard).
     ocpi_cdr_party_id :: T.Text,
     -- | Unique ID by which this Token can be identified.  This is the field
     -- used by the CPO’s system (RFID reader on the Charge Point) to identify

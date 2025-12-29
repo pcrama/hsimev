@@ -2,7 +2,7 @@ module Config (Config (..), simulationServerConfig, defaultConfig) where
 
 import Data.Kind (Type)
 import Data.Text qualified as T
-import Data.Word (Word64)
+import Data.Word (Word64, Word8)
 import Options.Applicative
 import Prelude
 
@@ -17,7 +17,10 @@ data Config = Config
     -- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/transport_and_format.asciidoc#112-authorization-header
     scspToken :: String,
     -- | how long the simulation should run in [s]
-    simulationDuration :: Word64
+    simulationDuration :: Word64,
+    stationId :: T.Text,
+    connectorId :: Word8,
+    transactionId :: T.Text
   }
   deriving stock (Show)
 
@@ -27,7 +30,10 @@ defaultConfig =
     { port = 3000,
       scspBaseUrl = "http://example.com/ocpi/2.2.1/",
       scspToken = "Token api-test-token",
-      simulationDuration = 20 * 60
+      simulationDuration = 20 * 60,
+      stationId = "station_id",
+      connectorId = 2,
+      transactionId = "4321234"
     }
 
 simulationServerConfig :: Parser Config
@@ -63,4 +69,26 @@ simulationServerConfig =
           <> showDefault
           <> value (simulationDuration defaultConfig)
           <> metavar "D"
+      )
+    <*> strOption
+      ( long "station-id"
+          <> help "Station ID on which the charging session is simulated"
+          <> showDefault
+          <> value (stationId defaultConfig)
+          <> metavar "S"
+      )
+    <*> option
+      auto
+      ( long "connector-id"
+          <> help "Connector ID on which the charging session is simulated"
+          <> showDefault
+          <> value (connectorId defaultConfig)
+          <> metavar "I"
+      )
+    <*> strOption
+      ( long "transaction-id"
+          <> help "Charging session ID"
+          <> showDefault
+          <> value (transactionId defaultConfig)
+          <> metavar "T"
       )
