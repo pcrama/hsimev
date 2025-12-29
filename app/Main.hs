@@ -69,4 +69,8 @@ runSimulationAndApi config = do
           transactionId = TransactionId "4321234",
           meterValuesStateMachine = NextMeterValueSampleDue $ meterValuesPeriodicity `after` startTime
         }
-    simConfig = OS.Config {OS.scspBaseUrl = Config.scspBaseUrl config}
+    simConfig =
+      OS.Config
+        { OS.scspBaseUrl = Config.scspBaseUrl config,
+          OS.scspToken = Config.scspToken config
+        }

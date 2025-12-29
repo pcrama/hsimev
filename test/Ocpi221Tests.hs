@@ -3,7 +3,7 @@
 module Ocpi221Tests (ocpi221Tests) where
 
 import Data.Text (Text)
-import Network.HTTP (Request (..))
+import Network.HTTP (HeaderName (..), Request (..), hdrName, hdrValue)
 import Network.URI (URI (..), URIAuth (..), nullURI, nullURIAuth)
 import Ocpi221
 import Test.Tasty (TestTree, testGroup)
@@ -72,21 +72,20 @@ ocpi221PutSessionRequest :: TestTree
 ocpi221PutSessionRequest =
   testGroup
     "putSessionRequest"
-    [ testCase "happy case" $
-        rqURI
-          <$> putSessionRequest
-            "http://example.com/ocpi2.2.1"
-            exampleSession
-          @?= Just
-            ( nullURI
-                { uriScheme = "http:",
-                  uriAuthority = Just $ nullURIAuth {uriRegName = "example.com"},
-                  uriPath = "/ocpi2.2.1/sessions/NL/LMS/2134"
-                }
-            ),
+    [ testCase "happy case" $ do
+        let Just req = putSessionRequest "http://example.com/ocpi2.2.1" "Token api-token" exampleSession
+        rqURI req
+          @?= nullURI
+            { uriScheme = "http:",
+              uriAuthority = Just $ nullURIAuth {uriRegName = "example.com"},
+              uriPath = "/ocpi2.2.1/sessions/NL/LMS/2134"
+            }
+        let headers = map (\x -> (hdrName x, hdrValue x)) $ rqHeaders req
+        lookup HdrAuthorization headers @?= Just "Token api-token"
+        lookup HdrContentType headers @?= Just "application/json",
       testCase "invalid URL" $
         uriAuthority . rqURI
-          <$> putSessionRequest "https://invalid url" exampleSession
+          <$> putSessionRequest "https://invalid url" "Token api-token" exampleSession
           @?= Nothing
     ]
   where

@@ -12,6 +12,10 @@ data Config = Config
     port :: Int,
     -- | Smart Charging Service Provider OCPI 2.2.1 API's base URL
     scspBaseUrl :: T.Text,
+    -- | API token: "Token some-super-secret-value"
+    --
+    -- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/transport_and_format.asciidoc#112-authorization-header
+    scspToken :: String,
     -- | how long the simulation should run in [s]
     simulationDuration :: Word64
   }
@@ -22,6 +26,7 @@ defaultConfig =
   Config
     { port = 3000,
       scspBaseUrl = "http://example.com/ocpi/2.2.1/",
+      scspToken = "Token api-test-token",
       simulationDuration = 20 * 60
     }
 
@@ -42,6 +47,13 @@ simulationServerConfig =
           <> short 's'
           <> metavar "BASE_URL"
           <> help "Base URL of the Smart Charging Service Provider receiving the simulated charging session states"
+      )
+    <*> strOption
+      ( long "scsp-token"
+          <> metavar "TOKEN_XXX"
+          <> help "Token accepted by the Smart Charging Service Provider receiving the simulated charging session states"
+          <> showDefault
+          <> value (scspToken defaultConfig)
       )
     <*> option
       auto

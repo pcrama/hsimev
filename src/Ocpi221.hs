@@ -347,16 +347,21 @@ putSessionRequest ::
   -- | URL where to "PUT" the Session information without the
   -- `/sessions/{country_code}/{party_id}/{session_id}` suffix, eg "https://example.com/ocpi/emsp/2.2.1"
   T.Text ->
+  -- | API token: "Token some-super-secret-value"
+  --
+  -- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/transport_and_format.asciidoc#112-authorization-header
+  String ->
   -- | Session object to "PUT"
   Session ->
   Maybe (Request BS.ByteString)
-putSessionRequest urlPutSession sess@(Session {ocpi_session_country_code, ocpi_session_party_id, ocpi_session_id}) = do
+putSessionRequest urlPutSession apiToken sess@(Session {ocpi_session_country_code, ocpi_session_party_id, ocpi_session_id}) = do
   let urlString = urlJoin urlPutSession $ toStringJoin '/' ["sessions", ocpi_session_country_code, ocpi_session_party_id] $ T.unpack ocpi_session_id
   let body = encode sess
   url <- parseURI urlString
   return
     $ replaceHeader HdrContentType "application/json"
       . replaceHeader HdrContentLength (show $ BS.length body)
+      . replaceHeader HdrAuthorization apiToken
     $ (mkRequest PUT url :: Request BS.ByteString) {rqBody = body}
 
 -- | Make HTTP "PUT" request to inform SCSP about Session object
@@ -367,11 +372,15 @@ putSessionRequestIO ::
   -- | URL where to "PUT" the Session information without the
   -- `/{country_code}/{party_id}/{session_id}` suffix
   T.Text ->
+  -- | API token: "Token some-super-secret-value"
+  --
+  -- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/transport_and_format.asciidoc#112-authorization-header
+  String ->
   -- | Session object to "PUT"
   Session ->
   m (Result (Response BS.ByteString))
-putSessionRequestIO urlPutSession sess = do
-  liftIO $ case putSessionRequest urlPutSession sess of
+putSessionRequestIO urlPutSession apiToken sess = do
+  liftIO $ case putSessionRequest urlPutSession apiToken sess of
     Nothing -> do
       let msg = "Unable to build HTTP PUT request for session"
       putStrLn msg

@@ -22,7 +22,7 @@ import System.Timeout qualified as SysTimeout
 import Prelude
 
 type Config :: Type
-data Config = Config {scspBaseUrl :: Text}
+data Config = Config {scspBaseUrl :: !Text, scspToken :: !String}
   deriving stock (Show)
 
 encodeSimulationTimestampForOcpi :: Timestamp -> Text
@@ -43,7 +43,7 @@ deliverSessionOutputIO config so = case so of
     let session = makeMeterValuesSession meterValues
      in putSession $ session {O.ocpi_session_status = "COMPLETED", O.ocpi_session_end_date_time = pure $ O.ocpi_session_last_updated session}
   where
-    putSession = void . O.putSessionRequestIO (scspBaseUrl config)
+    putSession = void . O.putSessionRequestIO (scspBaseUrl config) (scspToken config)
     putCallback cpUrl cprt = void $ O.postCallbackRequestIO cpUrl cprt
     makeStartSession timestamp (TransactionId transactionId) stationId connectorId =
       O.Session
