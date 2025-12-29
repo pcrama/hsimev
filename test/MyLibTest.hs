@@ -103,6 +103,7 @@ manuallyCheckedComputationTests =
           energyDelivered = 10000.0,
           currentOffered = 20,
           transactionId = TransactionId "1234321",
+          startDateTime = startTime,
           meterValuesStateMachine = NextMeterValueSampleDue $ meterValuesPeriodicity `after` startTime
         }
     stepByMinute :: SimState -> (OutputEvent [] SessionOutput, SimState)
@@ -175,7 +176,7 @@ instance Monoid (SimulationTrace e) where
 fakeSimulationTest :: TestTree
 fakeSimulationTest =
   testGroup "simulation traces" $
-    let startTime = Timestamp 0
+    let startTime = Timestamp 1
         meterValuesPeriodicity = minutes 3
         sessConf =
           SessionConfiguration
@@ -194,6 +195,7 @@ fakeSimulationTest =
               energyDelivered = 0.0,
               currentOffered = 11.5,
               transactionId = TransactionId "4321234",
+              startDateTime = Timestamp 0,
               meterValuesStateMachine = NextMeterValueSampleDue $ meterValuesPeriodicity `after` startTime
             }
         (sessionTrace, eventTrace) =
@@ -206,60 +208,60 @@ fakeSimulationTest =
             ]
             $ minutes 9 <> seconds 54
         (expectedSessionTrace, expectedEventTrace) =
-          ( [ ( Timestamp 0,
-                Charging {batteryLevel = 16000.0, energyDelivered = 0.0, currentOffered = 11.5, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180)}
+          ( [ ( Timestamp 1,
+                Charging {batteryLevel = 16000.0, energyDelivered = 0.0, currentOffered = 11.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180001)}
               ),
-              ( Timestamp 60000,
-                Charging {batteryLevel = 16037.47, energyDelivered = 44.08, currentOffered = 11.5, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180000)}
+              ( Timestamp 60001,
+                Charging {batteryLevel = 16037.47, energyDelivered = 44.08, currentOffered = 11.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180001)}
               ),
-              ( Timestamp 62000,
-                Charging {batteryLevel = 16038.72, energyDelivered = 45.55, currentOffered = 10.0, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180000)}
+              ( Timestamp 62001,
+                Charging {batteryLevel = 16038.72, energyDelivered = 45.55, currentOffered = 10.0, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180001)}
               ),
-              ( Timestamp 122000,
-                Charging {batteryLevel = 16071.30, energyDelivered = 83.89, currentOffered = 10.0, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180000)}
+              ( Timestamp 122001,
+                Charging {batteryLevel = 16071.30, energyDelivered = 83.89, currentOffered = 10.0, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 180001)}
               ),
-              ( Timestamp 180000,
-                Charging {batteryLevel = 16102.80, energyDelivered = 120.94, currentOffered = 10.0, transactionId = TransactionId "4321234", meterValuesStateMachine = Sampled (Timestamp 180000) (MeterValues {mvTransactionId = TransactionId "4321234", mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 180000, mvCurrents = (0.0, 10.0, 0.0), mvOfferedCurrent = 10.0, mvEnergyDelivered = 120.94})}
+              ( Timestamp 180001,
+                Charging {batteryLevel = 16102.80, energyDelivered = 120.94, currentOffered = 10.0, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = Sampled (Timestamp 180000) (MeterValues {mvTransactionId = TransactionId "4321234", mvStartDateTime = Timestamp 0, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 180001, mvCurrents = (0.0, 10.0, 0.0), mvOfferedCurrent = 10.0, mvEnergyDelivered = 120.94})}
               ),
-              ( Timestamp 180100,
-                Charging {batteryLevel = 16102.86, energyDelivered = 121.01, currentOffered = 10.0, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360000)}
+              ( Timestamp 180101,
+                Charging {batteryLevel = 16102.86, energyDelivered = 121.01, currentOffered = 10.0, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360001)}
               ),
-              ( Timestamp 240100,
-                Charging {batteryLevel = 16135.44, energyDelivered = 159.34, currentOffered = 10.0, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360000)}
+              ( Timestamp 240101,
+                Charging {batteryLevel = 16135.44, energyDelivered = 159.34, currentOffered = 10.0, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360001)}
               ),
-              ( Timestamp 300100,
-                Charging {batteryLevel = 16168.02, energyDelivered = 197.67, currentOffered = 10.0, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360000)}
+              ( Timestamp 300101,
+                Charging {batteryLevel = 16168.02, energyDelivered = 197.67, currentOffered = 10.0, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360001)}
               ),
-              ( Timestamp 312000,
-                Charging {batteryLevel = 16174.48, energyDelivered = 205.28, currentOffered = 8.5, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360000)}
+              ( Timestamp 312001,
+                Charging {batteryLevel = 16174.48, energyDelivered = 205.28, currentOffered = 8.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 360001)}
               ),
-              ( Timestamp 360000,
-                Charging {batteryLevel = 16196.64, energyDelivered = 231.34, currentOffered = 8.5, transactionId = TransactionId "4321234", meterValuesStateMachine = Sampled (Timestamp 360000) (MeterValues {mvTransactionId = TransactionId "4321234", mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 360000, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 231.34})}
+              ( Timestamp 360001,
+                Charging {batteryLevel = 16196.64, energyDelivered = 231.34, currentOffered = 8.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = Sampled (Timestamp 360000) (MeterValues {mvTransactionId = TransactionId "4321234", mvStartDateTime = Timestamp 0, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 360001, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 231.34})}
               ),
-              ( Timestamp 360100,
-                Charging {batteryLevel = 16196.69, energyDelivered = 231.40, currentOffered = 8.5, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 540000)}
+              ( Timestamp 360101,
+                Charging {batteryLevel = 16196.69, energyDelivered = 231.40, currentOffered = 8.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 540001)}
               ),
-              ( Timestamp 420100,
-                Charging {batteryLevel = 16224.38, energyDelivered = 263.98, currentOffered = 8.5, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 540000)}
+              ( Timestamp 420101,
+                Charging {batteryLevel = 16224.38, energyDelivered = 263.98, currentOffered = 8.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 540001)}
               ),
-              ( Timestamp 480100,
-                Charging {batteryLevel = 16252.08, energyDelivered = 296.56, currentOffered = 8.5, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 540000)}
+              ( Timestamp 480101,
+                Charging {batteryLevel = 16252.08, energyDelivered = 296.56, currentOffered = 8.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 540001)}
               ),
-              ( Timestamp 540000,
-                Charging {batteryLevel = 16279.73, energyDelivered = 329.09, currentOffered = 8.5, transactionId = TransactionId "4321234", meterValuesStateMachine = Sampled (Timestamp 540000) (MeterValues {mvTransactionId = TransactionId "4321234", mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 540000, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 329.09})}
+              ( Timestamp 540001,
+                Charging {batteryLevel = 16279.73, energyDelivered = 329.09, currentOffered = 8.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = Sampled (Timestamp 540000) (MeterValues {mvTransactionId = TransactionId "4321234", mvStartDateTime = Timestamp 0, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 540001, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 329.09})}
               ),
-              ( Timestamp 540100,
-                Charging {batteryLevel = 16279.77, energyDelivered = 329.14, currentOffered = 8.5, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 720000)}
+              ( Timestamp 540101,
+                Charging {batteryLevel = 16279.77, energyDelivered = 329.14, currentOffered = 8.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 720000)}
               ),
-              ( Timestamp 594000,
-                Charging {batteryLevel = 16304.66, energyDelivered = 358.42, currentOffered = 8.5, transactionId = TransactionId "4321234", meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 720000)}
+              ( Timestamp 594001,
+                Charging {batteryLevel = 16304.66, energyDelivered = 358.42, currentOffered = 8.5, transactionId = TransactionId "4321234", startDateTime = Timestamp 0, meterValuesStateMachine = NextMeterValueSampleDue (Timestamp 720000)}
               )
             ],
-            [ (Timestamp 62000, AcceptSetChargingProfile "cb10"),
-              (Timestamp 180100, SendMeterValues (MeterValues {mvTransactionId = TransactionId "4321234", mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 180000, mvCurrents = (0.0, 10.0, 0.0), mvOfferedCurrent = 10.0, mvEnergyDelivered = 120.94166666666698})),
-              (Timestamp 312000, AcceptSetChargingProfile "cb8p5"),
-              (Timestamp 360100, SendMeterValues (MeterValues {mvTransactionId = TransactionId "4321234", mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 360000, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 231.34166666666715})),
-              (Timestamp 540100, SendMeterValues (MeterValues {mvTransactionId = TransactionId "4321234", mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 540000, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 329.09166666666675}))
+            [ (Timestamp 62001, AcceptSetChargingProfile "cb10"),
+              (Timestamp 180101, SendMeterValues (MeterValues {mvTransactionId = TransactionId "4321234", mvStartDateTime = Timestamp 0, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 180001, mvCurrents = (0.0, 10.0, 0.0), mvOfferedCurrent = 10.0, mvEnergyDelivered = 120.94166666666698})),
+              (Timestamp 312001, AcceptSetChargingProfile "cb8p5"),
+              (Timestamp 360101, SendMeterValues (MeterValues {mvTransactionId = TransactionId "4321234", mvStartDateTime = Timestamp 0, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 360001, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 231.34166666666715})),
+              (Timestamp 540101, SendMeterValues (MeterValues {mvTransactionId = TransactionId "4321234", mvStartDateTime = Timestamp 0, mvStationId = "id_station", mvConnectorId = 2, mvTimestamp = Timestamp 540001, mvCurrents = (0.0, 8.5, 0.0), mvOfferedCurrent = 8.5, mvEnergyDelivered = 329.09166666666675}))
             ]
           )
      in [ testCase "session trace length" $ assertEqual "prefix" (length sessionTrace) (length expectedSessionTrace),

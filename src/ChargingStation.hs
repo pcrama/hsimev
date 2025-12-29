@@ -157,6 +157,7 @@ data SessionState
         -- | how many [A] the EV should use
         currentOffered :: !Double,
         transactionId :: !TransactionId,
+        startDateTime :: !Timestamp,
         meterValuesStateMachine :: !MeterValuesStateMachine
       }
   | Finishing
@@ -179,6 +180,7 @@ data MeterValues = MeterValues
   { mvTransactionId :: !TransactionId,
     mvStationId :: !Text,
     mvConnectorId :: !Word8,
+    mvStartDateTime :: !Timestamp,
     mvTimestamp :: !Timestamp,
     mvCurrents :: !(Double, Double, Double),
     mvOfferedCurrent :: !Double,
@@ -289,7 +291,7 @@ chargeEfficientlyUntil80Percent _ Available _ _ = return Available
 chargeEfficientlyUntil80Percent _ Preparing _ _ = return Preparing
 chargeEfficientlyUntil80Percent
   (SessionConfiguration {getInstantaneousCurrent, sessionTarget, batteryCapacity, stationId, connectorId})
-  sessionState@(Charging {energyDelivered, batteryLevel, currentOffered, transactionId})
+  sessionState@(Charging {energyDelivered, batteryLevel, currentOffered, transactionId, startDateTime})
   dt
   nextTime = do
     case sessionTarget of
@@ -321,6 +323,7 @@ chargeEfficientlyUntil80Percent
           { mvTransactionId = transactionId,
             mvStationId = stationId,
             mvConnectorId = connectorId,
+            mvStartDateTime = startDateTime,
             mvTimestamp = nextTime,
             mvCurrents = (0, 0, 0),
             mvOfferedCurrent = currentOffered,
@@ -412,7 +415,7 @@ stepSessionState session@(Session (SessionConfiguration {charge, getInstantaneou
     shortestDelayUntilNextSample = milliseconds 1 -- how long to wait before making new MeterValues sample if we are late
     sampleDelay = milliseconds 100 -- delay between taking the MeterValues sample and making the output event
     updateMeterValuesStateMachine :: SessionState -> (OutputEvent [] SessionOutput, SessionState)
-    updateMeterValuesStateMachine newState@(Charging {transactionId, currentOffered, energyDelivered, meterValuesStateMachine = (NextMeterValueSampleDue sampleTs)})
+    updateMeterValuesStateMachine newState@(Charging {transactionId, startDateTime, currentOffered, energyDelivered, meterValuesStateMachine = (NextMeterValueSampleDue sampleTs)})
       | now < sampleTs = do
           tellNextSimulationStep $ now `durationUntil` sampleTs
           return newState
@@ -427,6 +430,7 @@ stepSessionState session@(Session (SessionConfiguration {charge, getInstantaneou
                       { mvTransactionId = transactionId,
                         mvStationId = stationId,
                         mvConnectorId = connectorId,
+                        mvStartDateTime = startDateTime,
                         mvTimestamp = now,
                         mvCurrents = getInstantaneousCurrent now newState,
                         mvOfferedCurrent = currentOffered,

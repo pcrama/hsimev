@@ -67,6 +67,7 @@ runSimulationAndApi config = do
           energyDelivered = 0.0,
           currentOffered = 11.5,
           transactionId = TransactionId "4321234",
+          startDateTime = startTime,
           meterValuesStateMachine = NextMeterValueSampleDue $ meterValuesPeriodicity `after` startTime
         }
     simConfig =

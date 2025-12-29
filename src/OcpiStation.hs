@@ -74,6 +74,7 @@ deliverSessionOutputIO config so = case so of
           { mvTransactionId = TransactionId transactionId,
             mvStationId,
             mvConnectorId,
+            mvStartDateTime,
             mvTimestamp,
             mvCurrents,
             mvOfferedCurrent,
@@ -84,7 +85,7 @@ deliverSessionOutputIO config so = case so of
           { O.ocpi_session_country_code = "NL",
             O.ocpi_session_party_id = "LMS",
             O.ocpi_session_id = transactionId,
-            O.ocpi_session_start_date_time = encodeSimulationTimestampForOcpi mvTimestamp,
+            O.ocpi_session_start_date_time = encodeSimulationTimestampForOcpi mvStartDateTime,
             O.ocpi_session_end_date_time = Nothing,
             O.ocpi_session_kwh = O.fromWhTo_kWh mvEnergyDelivered,
             O.ocpi_session_cdr_token =
