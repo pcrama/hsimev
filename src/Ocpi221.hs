@@ -11,6 +11,7 @@ module Ocpi221
     ChargingProfileResultType (..),
     Session (..),
     CdrToken (..),
+    encodeTimeAsRFC3339,
     successResponse,
     successResponseIO,
     errorResponse,
@@ -36,6 +37,7 @@ import Data.Aeson
 import Data.ByteString.Lazy qualified as BS
 import Data.Kind (Type)
 import Data.Text qualified as T
+import Data.Time (UTCTime)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import GHC.Generics (Generic)
@@ -156,12 +158,14 @@ withTimestamp = (<$> liftIO getCurrentTimeAsRFC3339)
 -- | Source - https://stackoverflow.com/a/73646742 and https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/types.asciidoc#types_datetime_type
 -- Posted by beyarkay, modified by community. See post 'Timeline' for change history
 -- Retrieved 2025-12-25, License - CC BY-SA 4.0
-getCurrentTimeAsRFC3339 :: IO T.Text
-getCurrentTimeAsRFC3339 = do
-  t <- getCurrentTime
+encodeTimeAsRFC3339 :: UTCTime -> T.Text
+encodeTimeAsRFC3339 t =
   -- Take the first 23 characters so we don't get the microseconds
   let val = T.pack $ take 23 $ formatTime defaultTimeLocale "%FT%T%Q" t
-  return $ val <> "Z"
+   in val <> "Z"
+
+getCurrentTimeAsRFC3339 :: IO T.Text
+getCurrentTimeAsRFC3339 = encodeTimeAsRFC3339 <$> getCurrentTime
 
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_sessions.asciidoc#mod_sessions_session_object
 type Session :: Type

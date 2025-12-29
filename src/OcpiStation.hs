@@ -13,24 +13,27 @@ import Control.Concurrent (MVar, takeMVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Functor (void)
 import Data.Kind (Type)
-import Data.Text (Text, pack)
-import Data.Time.Calendar (Day (..))
-import Data.Time.Clock (UTCTime (..), addUTCTime, getCurrentTime)
-import Data.Time.Format (defaultTimeLocale, formatTime)
+import Data.Text (Text, pack, unpack)
+import Data.Time.Clock (UTCTime (..), getCurrentTime)
 import Ocpi221 qualified as O
 import System.Timeout qualified as SysTimeout
 import Prelude
 
 type Config :: Type
-data Config = Config {scspBaseUrl :: !Text, scspToken :: !String}
-  deriving stock (Show)
+data Config = Config {scspBaseUrl :: !Text, scspToken :: !String, timestampToUtcTime :: !(Timestamp -> UTCTime)}
 
-encodeSimulationTimestampForOcpi :: Timestamp -> Text
-encodeSimulationTimestampForOcpi ts = formatted <> "Z"
-  where
-    utct0 = UTCTime {utctDay = ModifiedJulianDay 0, utctDayTime = 0}
-    utct = addUTCTime (realToFrac $ secondsFrom $ clampingDurationUntil (Timestamp 0) ts) utct0
-    formatted = pack $ take 23 $ formatTime defaultTimeLocale "%FT%T%Q" utct
+instance Show Config where
+  show (Config {scspBaseUrl, scspToken, timestampToUtcTime}) =
+    "Config {scspBaseUrl="
+      <> show scspBaseUrl
+      <> ", scspToken="
+      <> show scspToken
+      <> ", timestampToUtcTime=<t0:"
+      <> unpack (encodeSimulationTimestampForOcpi timestampToUtcTime $ Timestamp 0)
+      <> ">}"
+
+encodeSimulationTimestampForOcpi :: (Timestamp -> UTCTime) -> Timestamp -> Text
+encodeSimulationTimestampForOcpi shiftTime = O.encodeTimeAsRFC3339 . shiftTime
 
 deliverSessionOutputIO :: (MonadIO m) => Config -> SessionOutput -> m ()
 deliverSessionOutputIO config so = case so of
@@ -45,12 +48,13 @@ deliverSessionOutputIO config so = case so of
   where
     putSession = void . O.putSessionRequestIO (scspBaseUrl config) (scspToken config)
     putCallback cpUrl cprt = void $ O.postCallbackRequestIO cpUrl cprt
+    encodeTimestamp = encodeSimulationTimestampForOcpi (timestampToUtcTime config)
     makeStartSession timestamp (TransactionId transactionId) stationId connectorId =
       O.Session
         { O.ocpi_session_country_code = "NL",
           O.ocpi_session_party_id = "LMS",
           O.ocpi_session_id = transactionId,
-          O.ocpi_session_start_date_time = encodeSimulationTimestampForOcpi timestamp,
+          O.ocpi_session_start_date_time = encodeTimestamp timestamp,
           O.ocpi_session_end_date_time = Nothing,
           O.ocpi_session_kwh = 0,
           O.ocpi_session_cdr_token =
@@ -67,7 +71,7 @@ deliverSessionOutputIO config so = case so of
           O.ocpi_session_connector_id = pack $ show connectorId,
           O.ocpi_session_currency = "EUR",
           O.ocpi_session_status = "ACTIVE",
-          O.ocpi_session_last_updated = encodeSimulationTimestampForOcpi timestamp
+          O.ocpi_session_last_updated = encodeTimestamp timestamp
         }
     makeMeterValuesSession
       ( MeterValues
@@ -85,7 +89,7 @@ deliverSessionOutputIO config so = case so of
           { O.ocpi_session_country_code = "NL",
             O.ocpi_session_party_id = "LMS",
             O.ocpi_session_id = transactionId,
-            O.ocpi_session_start_date_time = encodeSimulationTimestampForOcpi mvStartDateTime,
+            O.ocpi_session_start_date_time = encodeTimestamp mvStartDateTime,
             O.ocpi_session_end_date_time = Nothing,
             O.ocpi_session_kwh = O.fromWhTo_kWh mvEnergyDelivered,
             O.ocpi_session_cdr_token =
@@ -102,7 +106,7 @@ deliverSessionOutputIO config so = case so of
             O.ocpi_session_connector_id = pack $ show mvConnectorId,
             O.ocpi_session_currency = "EUR",
             O.ocpi_session_status = "ACTIVE",
-            O.ocpi_session_last_updated = encodeSimulationTimestampForOcpi mvTimestamp
+            O.ocpi_session_last_updated = encodeTimestamp mvTimestamp
           }
 
 parseSetChargingProfile :: TransactionId -> O.SetChargingProfile -> Maybe SimulationSetChargingProfile

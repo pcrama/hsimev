@@ -5,6 +5,7 @@ import Config qualified
 import Control.Concurrent (MVar, forkIO, newEmptyMVar, putMVar)
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor (void)
+import Data.Time.Clock (getCurrentTime)
 import Ocpi221 qualified as O
 import OcpiStation qualified as OS
 import Options.Applicative
@@ -44,6 +45,13 @@ runSimulationAndApi :: Config.Config -> IO ()
 runSimulationAndApi config = do
   ch <- newEmptyMVar
   putStrLn $ "Forking API server on port " <> show (Config.port config)
+  currentTime <- getCurrentTime
+  let simConfig =
+        OS.Config
+          { OS.scspBaseUrl = Config.scspBaseUrl config,
+            OS.scspToken = Config.scspToken config,
+            OS.timestampToUtcTime = simulationTimeToUTCTime startTime currentTime
+          }
   putStrLn $ "Starting simulation with config " <> show simConfig
   void $ forkIO $ apiServer (Config.port config) ch
   OS.startSimulation simConfig ch (Session sessConf sessState) startTime $ seconds $ Config.simulationDuration config
@@ -69,9 +77,4 @@ runSimulationAndApi config = do
           transactionId = TransactionId "4321234",
           startDateTime = startTime,
           meterValuesStateMachine = NextMeterValueSampleDue $ meterValuesPeriodicity `after` startTime
-        }
-    simConfig =
-      OS.Config
-        { OS.scspBaseUrl = Config.scspBaseUrl config,
-          OS.scspToken = Config.scspToken config
         }

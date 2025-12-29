@@ -68,6 +68,7 @@ executable hsimev
         optparse-applicative >=0.19,
         scotty ^>=0.22,
         text,
+        time,
         hsimev
 
     hs-source-dirs:   app
