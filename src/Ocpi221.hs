@@ -74,22 +74,22 @@ type ChargingProfile :: Type
 data ChargingProfile = ChargingProfile
   { -- | Starting point of an absolute profile. If absent the profile will be
     -- relative to start of charging.
-    start_date_time :: Maybe T.Text,
+    start_date_time :: !(Maybe T.Text),
     -- | Duration of the charging profile in seconds. If the duration is left
     -- empty, the last period will continue indefinitely or until end of the
     -- transaction in case start_date_time is absent.
-    duration :: Maybe Int,
+    duration :: !(Maybe Int),
     -- | "W" or "A" but I'm not going to create a data type with those constructors...
-    charging_rate_unit :: T.Text,
+    charging_rate_unit :: !T.Text,
     -- | Minimum charging rate supported by the EV. The unit of measure is
     -- defined by the chargingRateUnit. This parameter is intended to be
     -- used by a local smart charging algorithm to optimize the power
     -- allocation for in the case a charging process is inefficient at lower
     -- charging rates. Accepts at most one digit fraction (e.g. 8.1)
-    min_charging_rate :: Maybe Double,
+    min_charging_rate :: !(Maybe Double),
     -- | List of ChargingProfilePeriod elements defining maximum power or
     -- current usage over time.
-    charging_profile_period :: [ChargingProfilePeriod]
+    charging_profile_period :: ![ChargingProfilePeriod]
   }
   deriving anyclass (ToJSON, FromJSON)
   deriving stock (Show, Generic)
@@ -100,11 +100,11 @@ type ChargingProfilePeriod :: Type
 data ChargingProfilePeriod = ChargingProfilePeriod
   { -- | Start of the period, in seconds from the start of profile. The value
     -- of StartPeriod also defines the stop time of the previous period.
-    start_period :: Int,
+    start_period :: !Int,
     -- | Charging rate limit during the profile period, in the applicable
     -- chargingRateUnit, for example in Amperes (A) or Watts (W). Accepts at
     -- most one digit fraction (e.g. 8.1).
-    limit :: Double
+    limit :: !Double
   }
   deriving anyclass (ToJSON, FromJSON)
   deriving stock (Show, Generic)
@@ -115,11 +115,11 @@ type ChargingProfileResponse :: Type
 data ChargingProfileResponse = ChargingProfileResponse
   { -- | Response from the CPO on the ChargingProfile request: (ACCEPTED |
     -- NOT_SUPPORTED | REJECTED | TOO_OFTEN | UNKNOWN_SESSION)
-    result :: T.Text,
+    result :: !T.Text,
     -- | Timeout for this ChargingProfile request in seconds. When the Result
     -- is not received within this timeout, the eMSP can assume that the
     -- message might never be sent.
-    timeout :: Int
+    timeout :: !Int
   }
   deriving anyclass (ToJSON, FromJSON)
   deriving stock (Show, Generic)
@@ -127,10 +127,10 @@ data ChargingProfileResponse = ChargingProfileResponse
 -- | https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/transport_and_format.asciidoc#117-response-format
 type ResponseFormat :: Type -> Type
 data ResponseFormat a = ResponseFormat
-  { data_ :: a,
-    status_code :: Int,
-    status_message :: Maybe T.Text,
-    timestamp :: T.Text
+  { data_ :: !a,
+    status_code :: !Int,
+    status_message :: !(Maybe T.Text),
+    timestamp :: T.Text -- Not strict because of the likely usage of 'withTimestamp' to override it
   }
   deriving stock (Show, Eq)
 
@@ -171,52 +171,52 @@ getCurrentTimeAsRFC3339 = encodeTimeAsRFC3339 <$> getCurrentTime
 type Session :: Type
 data Session = Session
   { -- | ISO-3166 alpha-2 country code of the MSP that \'owns\' this Token.
-    ocpi_session_country_code :: T.Text,
+    ocpi_session_country_code :: !T.Text,
     -- | ID of the eMSP that \'owns\' this Token (following the ISO-15118 standard).
-    ocpi_session_party_id :: T.Text,
+    ocpi_session_party_id :: !T.Text,
     -- | The unique id that identifies the charging session in the CPO platform.
-    ocpi_session_id :: T.Text,
+    ocpi_session_id :: !T.Text,
     -- | The timestamp when the session became ACTIVE in the Charge Point.  When
     -- the session is still PENDING, this field SHALL be set to the time the
     -- Session was created at the Charge Point. When a Session goes from PENDING
     -- to ACTIVE, this field SHALL be updated to the moment the Session went to
     -- ACTIVE in the Charge Point.
-    ocpi_session_start_date_time :: T.Text,
+    ocpi_session_start_date_time :: !T.Text,
     -- | The timestamp when the session was completed/finished, charging might
     -- have finished before the session ends, for example: EV is full, but
     -- parking cost also has to be paid.
-    ocpi_session_end_date_time :: Maybe T.Text,
+    ocpi_session_end_date_time :: !(Maybe T.Text),
     -- | How many kWh were charged.
-    ocpi_session_kwh :: Double,
+    ocpi_session_kwh :: !Double,
     -- | Token used to start this charging session, including all the relevant
     -- information to identify the unique token.
-    ocpi_session_cdr_token :: CdrToken,
+    ocpi_session_cdr_token :: !CdrToken,
     -- | Method used for authentication. This might change during a session: AUTH_REQUEST | COMMAND | WHITELIST
-    ocpi_session_auth_method :: T.Text,
-    -- authorization_reference :: T.Text -- Optional and not useful for my simulation -> skip
+    ocpi_session_auth_method :: !T.Text,
+    -- authorization_reference :: !T.Text -- Optional and not useful for my simulation -> skip
 
     -- | Location.id of the Location object of this CPO, on which the charging
     -- session is/was happening.
-    ocpi_session_location_id :: T.Text,
+    ocpi_session_location_id :: !T.Text,
     -- | EVSE.uid of the EVSE of this Location on which the charging session
     -- is/was happening. Allowed to be set to: #NA when this session is created
     -- for a reservation, but no EVSE yet assigned to the driver.
-    ocpi_session_evse_uid :: T.Text,
+    ocpi_session_evse_uid :: !T.Text,
     -- | Connector.id of the Connector of this Location where the charging
     -- session is/was happening. Allowed to be set to: #NA when this session is
     -- created for a reservation, but no connector yet assigned to the driver.
-    ocpi_session_connector_id :: T.Text,
-    -- meter_id :: T.Text -- Optional and not useful for my simulation -> skip
+    ocpi_session_connector_id :: !T.Text,
+    -- meter_id :: !T.Text -- Optional and not useful for my simulation -> skip
 
     -- | ISO 4217 code of the currency used for this session.
-    ocpi_session_currency :: T.Text,
-    -- charging_periods :: [ChargingPeriods] -- Optional and not useful for my simulation -> skip
-    -- total_cost :: Double -- Optional and not useful for my simulation -> skip
+    ocpi_session_currency :: !T.Text,
+    -- charging_periods :: ![ChargingPeriods] -- Optional and not useful for my simulation -> skip
+    -- total_cost :: !Double -- Optional and not useful for my simulation -> skip
 
     -- | The status of the session: ACTIVE | COMPLETED | INVALID | PENDING | RESERVATION
-    ocpi_session_status :: T.Text,
+    ocpi_session_status :: !T.Text,
     -- | Timestamp when this Session was last updated (or created).
-    ocpi_session_last_updated :: T.Text
+    ocpi_session_last_updated :: !T.Text
   }
   deriving stock (Show, Eq)
 
@@ -265,21 +265,21 @@ instance ToJSON Session where
 type CdrToken :: Type
 data CdrToken = CdrToken
   { -- | ISO-3166 alpha-2 country code of the MSP that \'owns\' this Token.
-    ocpi_cdr_country_code :: T.Text,
+    ocpi_cdr_country_code :: !T.Text,
     -- | ID of the eMSP that \'owns\' this Token (following the ISO-15118 standard).
-    ocpi_cdr_party_id :: T.Text,
+    ocpi_cdr_party_id :: !T.Text,
     -- | Unique ID by which this Token can be identified.  This is the field
     -- used by the CPO’s system (RFID reader on the Charge Point) to identify
     -- this token.  Currently, in most cases: type=RFID, this is the RFID hidden
     -- ID as read by the RFID reader, but that is not a requirement.  If this is
     -- a type=APP_USER Token, it will be a unique, by the eMSP, generated ID.
-    ocpi_cdr_uid :: T.Text,
+    ocpi_cdr_uid :: !T.Text,
     -- | AD_HOC_USER | APP_USER | OTHER | RFID
-    ocpi_cdr_token_type :: T.Text,
+    ocpi_cdr_token_type :: !T.Text,
     -- | Uniquely identifies the EV driver contract token within the eMSP’s
     -- platform (and suboperator platforms). Recommended to follow the
     -- specification for eMA ID from "eMI3 standard version V1.0"
-    ocpi_cdr_contract_id :: T.Text
+    ocpi_cdr_contract_id :: !T.Text
   }
   deriving stock (Show, Eq)
 

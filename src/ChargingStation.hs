@@ -191,11 +191,11 @@ data MeterValues = MeterValues
 type SessionOutput :: Type
 data SessionOutput
   = StartCharge !Timestamp !TransactionId !Text !Word8
-  | SendMeterValues MeterValues
-  | AcceptSetChargingProfile Text
-  | RejectSetChargingProfile Text
-  | TimeoutSetChargingProfile Text
-  | EndOfCharge MeterValues
+  | SendMeterValues !MeterValues
+  | AcceptSetChargingProfile !Text
+  | RejectSetChargingProfile !Text
+  | TimeoutSetChargingProfile !Text
+  | EndOfCharge !MeterValues
   deriving stock (Show, Eq)
 
 type SessionConfiguration :: Type
