@@ -16,7 +16,7 @@ copyright: 2025 Philippe Crama
 extra-source-files: README.org
 
 library
-    exposed-modules:  ChargingStation, Ocpi221, OcpiStation
+    exposed-modules:  ChargingStation, Ocpi221, OcpiStation, PriorityMap
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -65,7 +65,7 @@ executable hsimev
     -- other-extensions:
     build-depends:
         base >=4.16.4.0 && <4.19,
-        optparse-applicative >=0.19,
+        optparse-applicative ^>=0.18,
         scotty ^>=0.22,
         text,
         time,
@@ -94,14 +94,23 @@ executable hsimev
                       -Wno-missing-local-signatures
                       -- Don’t warn if the monomorphism restriction is used
                       -Wno-monomorphism-restriction
+                      -- time-manager ==0.3.0 broke my simulator with error message like
+                      -- GHC.Internal.Event.Thread.getSystemTimerManager: the TimerManager requires linking against the threaded runtime
+                      -threaded -with-rtsopts=-N
+
 test-suite hsimev-test
     default-language: Haskell2010
-    default-extensions: DerivingStrategies, FlexibleContexts, NamedFieldPuns, NoGeneralizedNewtypeDeriving, OverloadedStrings
+    default-extensions: DerivingStrategies, FlexibleContexts, ImportQualifiedPost, NamedFieldPuns, NoGeneralizedNewtypeDeriving, OverloadedStrings
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          MyLibTest.hs
-    other-modules:    Ocpi221Tests
+    other-modules:    FakeSimulation
+                    , Ocpi221Tests
+                    , OcpiStationTests
+                    , PriorityMapTests
     build-depends:    base >=4.16.4.0 && <4.19
+                    , falsify
+                    , hsimev
                     , HTTP
                     , mtl
                     , network-uri
@@ -109,4 +118,3 @@ test-suite hsimev-test
                     , tasty-hunit
                     , text
                     , time
-                    , hsimev

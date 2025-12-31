@@ -16,6 +16,7 @@ module Ocpi221
     successResponseIO,
     errorResponse,
     errorResponseIO,
+    postCallbackRequest,
     postCallbackRequestIO,
     putSessionRequest,
     putSessionRequestIO,
@@ -311,19 +312,44 @@ instance ToJSON ChargingProfileResultType where
   toJSON CprtRejected = "REJECTED"
   toJSON CprtUnknown = "UNKNOWN"
 
-postCallbackRequestIO :: (MonadIO m) => T.Text -> ChargingProfileResultType -> m (Result (Response BS.ByteString))
-postCallbackRequestIO callbackUrl cprt = do
-  liftIO $ case parseURI $ T.unpack callbackUrl of
+-- | Build "POST" request to inform SCSP about the charging station's response to the SCSP's 'SetChargingProfile' request
+postCallbackRequest ::
+  -- | API token: "Token some-super-secret-value"
+  --
+  -- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/transport_and_format.asciidoc#112-authorization-header
+  String ->
+  -- | 'SetChargingProfile'.'response_url' URL provided by SCSP in their charging profile
+  T.Text ->
+  -- | Outcome (from the charging station) for the SetChargingProfile request
+  ChargingProfileResultType ->
+  Maybe (Request BS.ByteString)
+postCallbackRequest apiToken callbackUrl cprt = buildRequest <$> parseURI (T.unpack callbackUrl)
+  where
+    buildRequest url =
+      let body = encode $ object ["result" .= toJSON cprt]
+       in replaceHeader HdrContentType "application/json"
+            . replaceHeader HdrContentLength (show $ BS.length body)
+            . replaceHeader HdrAuthorization apiToken
+            $ (mkRequest POST url :: Request BS.ByteString) {rqBody = body}
+
+postCallbackRequestIO ::
+  (MonadIO m) =>
+  -- | API token: "Token some-super-secret-value"
+  --
+  -- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/transport_and_format.asciidoc#112-authorization-header
+  String ->
+  -- | 'SetChargingProfile'.'response_url' URL provided by SCSP in their charging profile
+  T.Text ->
+  -- | Outcome (from the charging station) for the SetChargingProfile request
+  ChargingProfileResultType ->
+  m (Result (Response BS.ByteString))
+postCallbackRequestIO apiToken callbackUrl cprt = do
+  liftIO $ case postCallbackRequest apiToken callbackUrl cprt of
     Nothing -> do
       let msg = T.unpack $ "Unable to build HTTP POST request for callbackUrl " <> callbackUrl
       putStrLn msg
       return $ Left $ ErrorMisc msg
-    Just url -> do
-      body <- encode <$> successResponseIO cprt
-      let req =
-            replaceHeader HdrContentType "application/json"
-              . replaceHeader HdrContentLength (show $ BS.length body)
-              $ (mkRequest POST url :: Request BS.ByteString) {rqBody = body}
+    Just req -> do
       putStrLn $ "Making HTTP request " <> show req <> "with body " <> show (rqBody req)
       simpleHTTP req
 
@@ -352,7 +378,7 @@ toStringJoin sep texts finalTail = foldr unpackConcat (sep : finalTail) texts
 -- https://github.com/ocpi/ocpi/blob/a57ecb624fbe0f19537ac7956a11f3019a65018f/mod_sessions.asciidoc#put-method-1
 putSessionRequest ::
   -- | URL where to "PUT" the Session information without the
-  -- `/sessions/{country_code}/{party_id}/{session_id}` suffix, eg "https://example.com/ocpi/emsp/2.2.1"
+  -- `\/sessions\/{country_code}\/{party_id}\/{session_id}` suffix, eg "https://example.com/ocpi/emsp/2.2.1"
   T.Text ->
   -- | API token: "Token some-super-secret-value"
   --

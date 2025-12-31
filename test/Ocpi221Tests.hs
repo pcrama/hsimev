@@ -14,6 +14,7 @@ ocpi221Tests =
     ocpi221ToStringJoinTests,
     ocpi221UrlJoinTests,
     ocpi221FromWhTo_kWhTests,
+    ocpi221PostCallbackRequest,
     ocpi221PutSessionRequest
   ]
 
@@ -113,3 +114,27 @@ ocpi221PutSessionRequest =
           ocpi_session_status = "ACTIVE",
           ocpi_session_last_updated = "2025-12-29T11:03:04Z"
         }
+
+ocpi221PostCallbackRequest :: TestTree
+ocpi221PostCallbackRequest =
+  testGroup
+    "postCallbackRequest"
+    [ testCase "happy case" $ do
+        let Just req = postCallbackRequest "Token api-token" "https://scsp.com/station_id/session_id" CprtAccepted
+        rqURI req
+          @?= nullURI
+            { uriScheme = "https:",
+              uriAuthority = Just $ nullURIAuth {uriRegName = "scsp.com"},
+              uriPath = "/station_id/session_id"
+            }
+        let headers = map (\x -> (hdrName x, hdrValue x)) $ rqHeaders req
+        lookup HdrAuthorization headers @?= Just "Token api-token"
+        lookup HdrContentType headers @?= Just "application/json"
+        rqBody req @?= "{\"result\":\"ACCEPTED\"}",
+      testCase "invalid URL" $
+        uriAuthority . rqURI
+          <$> postCallbackRequest "Token api-token" "bad scsp.com provided invalid URL" CprtAccepted
+          @?= Nothing
+    ]
+  where
+    responseFormatBuilder = flip successResponse "2025-12-31T12:34:56Z"

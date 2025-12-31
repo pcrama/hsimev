@@ -119,11 +119,11 @@ type SessionTarget :: Type
 data SessionTarget
   = -- | driver wants to leave at a fixed time
     LeaveAtTick !Timestamp
-  | -- | driver wants to leave at the earliest after the given time but only if their charge level is sufficient
+  | -- | driver wants to leave at the earliest after the given time but only if their charge level in [Wh] is sufficient
     LeaveAfterBoth !Timestamp !Double
-  | -- | driver will stay until the given time or leave as soon as their battery has reached that charge level
+  | -- | driver will stay until the given time or leave as soon as their battery has reached that charge level in [Wh]
     LeaveAfterEither !Timestamp !Double
-  | -- | drive will stay until their battery has reached that charge level
+  | -- | drive will stay until their battery has reached that charge level in [Wh]
     LeaveAtLevel !Double
   deriving stock (Show, Eq)
 
@@ -451,12 +451,26 @@ stepSessionState session@(Session (SessionConfiguration {charge, getInstantaneou
           return newState
     updateMeterValuesStateMachine newState = return newState
 
+-- | Step 'Session' (i.e. update its state from ('InputEvent'.'ieTick' - 'Duration') until 'ieTick')
 stepSession :: Session -> Duration -> InputEvent SimulationSetChargingProfile -> (OutputEvent [] SessionOutput, Session)
 stepSession session@(Session sessionConfiguration _) duration inputEvent = (outputEvent, Session sessionConfiguration nextState)
   where
     (outputEvent, nextState) = stepSessionState session duration inputEvent
 
-simulate :: (Monad m) => (Session -> Duration -> InputEvent i -> (OutputEvent [] e, Session)) -> (e -> m ()) -> (SimState -> InputEvent i -> m ()) -> SimState -> InputEvent i -> m ()
+simulate ::
+  (Monad m) =>
+  -- | Update 'Session'\'s state (assumed to be at 'InputEvent'.'ieTick' - 'Duration') to become the state
+  -- at 'InputEvent'.'ieTick'.
+  (Session -> Duration -> InputEvent i -> (OutputEvent [] e, Session)) ->
+  -- | Monadic action delivering the output events that were generated while "stepping" the 'Session'
+  (e -> m ()) ->
+  -- | Continue the simulation from the given state, where the next step is
+  -- given by the 'InputEvent' (unless an external event source provides an
+  -- event first)
+  (SimState -> InputEvent i -> m ()) ->
+  SimState ->
+  InputEvent i ->
+  m ()
 simulate
   stpSess
   deliverEvent

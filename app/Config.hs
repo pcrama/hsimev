@@ -32,7 +32,7 @@ defaultConfig =
       scspToken = "Token api-test-token",
       simulationDuration = 20 * 60,
       stationId = "station_id",
-      connectorId = 2,
+      connectorId = 1,
       transactionId = "4321234"
     }
 
