@@ -1,5 +1,5 @@
 -- | Simulation of a single charging session with pre-defined external input events
-module FakeSimulation (SimulationTrace (..), fakeSimulation) where
+module FakeSimulation (SimulationTrace (..), fakeSimulation, safeCalendarToCalendar) where
 
 import ChargingStation
 import Control.Monad.Writer (MonadWriter, tell)
@@ -11,14 +11,7 @@ fakeSimulation stepper startSession t0 safeCalendar totalDuration =
    in (fmap (\(SimState {tick, session}) -> (tick, session)) sessionTrace, outputTrace)
   where
     lastTimestamp = totalDuration `after` t0
-    initialCalendar =
-      reverse $
-        filter (\InputEvent {ieTick} -> ieTick <= lastTimestamp) $
-          snd $
-            foldl'
-              (\result@(t, as) (dur, ie) -> if t > lastTimestamp then result else let t1 = dur `after` t in (t1, InputEvent {ieTick = t1, ieTrigger = Just ie} : as))
-              (t0, [])
-              safeCalendar
+    initialCalendar = safeCalendarToCalendar t0 lastTimestamp safeCalendar
     -- goSimulation ::
     --   (Show i) =>
     --   -- | step SimState's session from input event's ieTick to ieTick + duration
@@ -55,6 +48,26 @@ fakeSimulation stepper startSession t0 safeCalendar totalDuration =
               (Nothing, _) -> ie : ccaa
               (_, Nothing) -> ca : ccaa
               (Just _, Just _) -> ca : (mergeIntoCalendar ccaa $ InputEvent {ieTick = milliseconds 1 `after` ieTick, ieTrigger = ieTrigger})
+
+-- | A "safe calendar" is a calendar where the events are guaranteed to be
+-- ordered by increasing 'Timestamp'.  This is achieved by representing them
+-- as the 'Duration' values before the event (and after the preceding event).
+safeCalendarToCalendar ::
+  -- | The starting 'Timestamp' of the calendar (the first event happens `duration \`after\` t0`)
+  Timestamp ->
+  -- | The final 'Timestamp' of the calendar: no 'InputEvent's will be generated after this 'Timestamp'
+  Timestamp ->
+  -- | A representation of the calendar that guarantees that the events will be ordered
+  [(Duration, i)] ->
+  [InputEvent i]
+safeCalendarToCalendar t0 lastTimestamp safeCalendar =
+  reverse $
+    filter (\InputEvent {ieTick} -> ieTick <= lastTimestamp) $
+      snd $
+        foldl'
+          (\result@(t, as) (dur, ie) -> if t > lastTimestamp then result else let t1 = dur `after` t in (t1, InputEvent {ieTick = t1, ieTrigger = Just ie} : as))
+          (t0, [])
+          safeCalendar
 
 data SimulationTrace e = SimulationTrace [SimState] [(Timestamp, e)]
   deriving stock (Show)
