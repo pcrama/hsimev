@@ -407,10 +407,14 @@ stepSessionState session@(Session (SessionConfiguration {charge, getInstantaneou
     extractSessionState (Session _ state) = return state
 
     updateOfferedCurrent :: Maybe SimulationSetChargingProfile -> SessionState -> (OutputEvent [] SessionOutput, SessionState)
-    updateOfferedCurrent (Just setChargingProfile) sessStt = do
-      void $ tellNextSimulationStepAndEvent defaultNextSimulationStep $ AcceptSetChargingProfile $ scpCallback setChargingProfile
-      return $ sessStt {currentOffered = scpCurrentOffered setChargingProfile}
     updateOfferedCurrent Nothing sessStt = return sessStt
+    updateOfferedCurrent (Just SimulationSetChargingProfile{scpTransactionId, scpCurrentOffered, scpCallback}) sessStt@(Charging {transactionId})
+      | scpTransactionId == transactionId = do
+          -- TODO: check if offered current is within acceptable range and return RejectSetChargingProfile if needed
+         void $ tellNextSimulationStepAndEvent defaultNextSimulationStep $ AcceptSetChargingProfile scpCallback
+         return $ sessStt {currentOffered = scpCurrentOffered}
+      | otherwise = return sessStt
+    updateOfferedCurrent (Just _) sessStt = return sessStt
 
     shortestDelayUntilNextSample = milliseconds 1 -- how long to wait before making new MeterValues sample if we are late
     sampleDelay = milliseconds 100 -- delay between taking the MeterValues sample and making the output event

@@ -1,12 +1,15 @@
-{-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE Safe #-}
 
 module OcpiStation
   ( Config (..),
     MultiSession,
     SessionKey,
     deliverSessionOutputIO,
+    mapEventToSession,
     parseSetChargingProfile,
+    sessionKey,
     startMultiSimulation,
+    startMultiSimulationIO,
     startSimulation,
   )
 where
@@ -24,7 +27,6 @@ import Data.Text (Text, pack, unpack)
 import Data.Time (UTCTime (..))
 import Data.Time.Clock (getCurrentTime)
 import Data.Word (Word8)
-import Debug.Trace (trace)
 import Ocpi221 qualified as O
 import PriorityMap qualified
 import System.Timeout qualified as SysTimeout
@@ -144,6 +146,29 @@ parseSetChargingProfile
         }
 parseSetChargingProfile _ _ = Nothing
 
+getNextEvent' ::
+  (MonadIO m) =>
+  -- | Channel to query for next event from external source
+  MVar i ->
+  -- | conversion function from wall clock time to simulation time
+  (UTCTime -> Timestamp) ->
+  -- | External event may not be later than this timestamp (expressed in
+  -- simulation time)
+  Timestamp ->
+  -- | How long to wait at most for an external event (this value is related
+  -- to the deadline: duration `after` (wallClockToTimestamp getCurrentTime) ≅
+  -- deadline).
+  Duration ->
+  m (Maybe (Duration, i))
+getNextEvent' ch wallClockToTimestamp deadline maxWaitTime = do
+  liftIO $ putStrLn $ "getNextEvent': deadline=" <> show deadline <> ", maxWaitTime=" <> show maxWaitTime
+  mbEvt <- liftIO $ SysTimeout.timeout (round $ 1000000 * secondsFrom maxWaitTime) $ takeMVar ch
+  case mbEvt of
+    Just evt -> do
+      now <- wallClockToTimestamp <$> liftIO getCurrentTime
+      return $ Just (now `clampingDurationUntil` deadline, evt)
+    Nothing -> return Nothing
+
 getNextEvent ::
   (MonadIO m, Show i) =>
   -- | conversion function from wall clock time to simulation time
@@ -222,6 +247,9 @@ recurseSimulation config wallClockToTimestamp finalTimestamp eventChannel simSta
 type SessionKey :: Type
 type SessionKey = (Text, Word8)
 
+sessionKey :: Session -> SessionKey
+sessionKey (Session (SessionConfiguration {stationId, connectorId}) _) = (stationId, connectorId)
+
 -- | A group of 'Session's simulated in parallel
 --
 -- Represented as a 'PriorityMap.PriorityMap' with
@@ -231,10 +259,6 @@ type SessionKey = (Text, Word8)
 -- - Value: A 'Session' and a 'Timestamp' up to which it was simulated
 type MultiSession :: Type
 type MultiSession = PriorityMap.PriorityMap Timestamp SessionKey (Session, Timestamp)
-
-type MultiSimulator :: Type
-newtype MultiSimulator = MultiSimulator MultiSession
-  deriving stock (Show)
 
 -- | Step all 'Session's from the 'MultiSession' that needed to be updated before the 'InputEvent'\'s 'ieTick'
 --
@@ -250,15 +274,31 @@ newtype MultiSimulator = MultiSimulator MultiSession
 --   'SimulationSetChargingProfile' we received
 -- - Go through all individual 'Session's that wanted to run at or before `m`
 --   (as evidenced by their priority) and update their state to reach 'm'.
-multiStepper :: MultiSession -> InputEvent (SessionKey, SimulationSetChargingProfile) -> (OutputEvent [] SessionOutput, MultiSession)
-multiStepper allSessions (InputEvent {ieTick, ieTrigger}) =
+multiStepper ::
+  -- | Function stepping a single session forward by the given 'Duration' to the 'InputEvent'\'s 'Timestamp'
+  (Session -> Duration -> InputEvent i -> (OutputEvent [] so, Session)) ->
+  -- | The "bundle" of sessions
+  MultiSession ->
+  -- | The input event with the 'SessionKey' to route the 'InputEvent.ieTrigger' to the correct 'Session'
+  InputEvent (SessionKey, i) ->
+  -- | All output events from stepping the sessions forward and the updated 'MultiSession' state
+  (OutputEvent [] so, MultiSession)
+multiStepper singleStepper allSessions (InputEvent {ieTick, ieTrigger}) =
   case ieTrigger of
-    Nothing -> multiStepperNoTrigger allSessions ieTick
-    Just trigger -> multiStepperForTrigger allSessions ieTick trigger
+    Nothing -> multiStepperNoTrigger singleStepper allSessions ieTick
+    Just trigger -> multiStepperForTrigger singleStepper allSessions ieTick trigger
 
 -- | Internal function for multiStepper, factored out for clarity
-multiStepperNoTrigger :: MultiSession -> Timestamp -> (OutputEvent [] SessionOutput, MultiSession)
-multiStepperNoTrigger allSessions tick = do
+multiStepperNoTrigger ::
+  -- | Function stepping a single session forward by the given 'Duration' to the 'InputEvent'\'s 'Timestamp'
+  (Session -> Duration -> InputEvent i -> (OutputEvent [] so, Session)) ->
+  -- | The "bundle" of sessions
+  MultiSession ->
+  -- | The target simulation timestamp
+  Timestamp ->
+  -- | All output events from stepping the sessions forward and the updated 'MultiSession' state
+  (OutputEvent [] so, MultiSession)
+multiStepperNoTrigger singleStepper allSessions tick = do
   case PriorityMap.splitAfterFirst allSessions of
     Nothing -> return allSessions
     Just ((oldPrio, sessKey, (sess, oldSessTimestamp)), tailSessions)
@@ -266,11 +306,11 @@ multiStepperNoTrigger allSessions tick = do
       | otherwise ->
           case oldSessTimestamp `maybeDurationUntil` tick of
             Just d -> do
-              case stepSession sess d inputEvent of
-                (NoEvent, _) -> multiStepperNoTrigger tailSessions tick
+              case singleStepper sess d inputEvent of
+                (NoEvent, _) -> multiStepperNoTrigger singleStepper tailSessions tick
                 (oe@(OutputEvent {oeNext}), newSess) -> do
                   tell oe
-                  newTail <- multiStepperNoTrigger tailSessions tick
+                  newTail <- multiStepperNoTrigger singleStepper tailSessions tick
                   return $ PriorityMap.insert newTail (oeNext `after` tick) sessKey (newSess, tick)
             Nothing ->
               error $
@@ -284,16 +324,31 @@ multiStepperNoTrigger allSessions tick = do
     inputEvent = InputEvent {ieTick = tick, ieTrigger = Nothing}
 
 -- | Internal function for multiStepper, factored out for clarity
-multiStepperForTrigger :: MultiSession -> Timestamp -> (SessionKey, SimulationSetChargingProfile) -> (OutputEvent [] SessionOutput, MultiSession)
-multiStepperForTrigger allSessions tick (sessKey, setChargingProf) = case PriorityMap.remove allSessions sessKey of
+multiStepperForTrigger ::
+  -- | Function stepping a single session forward by the given 'Duration' to
+  -- the 'InputEvent'\'s 'Timestamp'
+  (Session -> Duration -> InputEvent i -> (OutputEvent [] so, Session)) ->
+  -- | The "bundle" of sessions
+  MultiSession ->
+  -- | The target simulation timestamp
+  Timestamp ->
+  -- | The 'SessionKey' is the destination of the trigger (the second part of
+  -- the tuple): this is the trigger that gets delivered to the relevant
+  -- session, and the other sessions are given a change to "catch up" to the
+  -- trigger's 'Timestamp' using 'multiStepperNoTrigger'.
+  (SessionKey, i) ->
+  -- | All output events from stepping the sessions forward and the updated
+  -- 'MultiSession' state
+  (OutputEvent [] so, MultiSession)
+multiStepperForTrigger singleStepper allSessions tick (sessKey, trigger) = case PriorityMap.remove allSessions sessKey of
   Just ((_, (sess, oldSessTimestamp)), otherSessions) ->
     case oldSessTimestamp `maybeDurationUntil` tick of
       Just duration -> do
-        case stepSession sess duration $ InputEvent {ieTick = tick, ieTrigger = Just setChargingProf} of
+        case singleStepper sess duration $ InputEvent {ieTick = tick, ieTrigger = Just trigger} of
           (NoEvent, _) -> return otherSessions
           (oe@(OutputEvent {oeNext}), newSess) -> do
             tell oe
-            newOtherSessions <- multiStepperNoTrigger otherSessions tick
+            newOtherSessions <- multiStepperNoTrigger singleStepper otherSessions tick
             return $ PriorityMap.insert newOtherSessions (oeNext `after` tick) sessKey (newSess, tick)
       Nothing ->
         error $
@@ -307,21 +362,22 @@ multiStepperForTrigger allSessions tick (sessKey, setChargingProf) = case Priori
 
 multiSimulate ::
   (Monad m) =>
+  (String -> m ()) ->
   -- | Update 'Session'\'s state (assumed to be at 'InputEvent'.'ieTick' - 'Duration') to become the state
   -- at 'InputEvent'.'ieTick'.
   (MultiSession -> InputEvent i -> (OutputEvent [] e, MultiSession)) ->
   -- | Monadic action delivering the output events that were generated while "stepping" the 'Session'
   (e -> m ()) ->
   -- | Simulation function to call with the updated 'Session' with the 'OutputEvent'.'oeNext' timestamp
-  (MultiSimulator -> InputEvent i -> m ()) ->
-  MultiSimulator ->
+  (MultiSession -> InputEvent i -> m ()) ->
+  MultiSession ->
   InputEvent i ->
   m ()
-multiSimulate stepper deliverEvent nextSim (MultiSimulator state) inputEvent@(InputEvent {ieTick}) =
+multiSimulate logString stepper deliverEvent nextSim state inputEvent@(InputEvent {ieTick}) =
   case stepper state inputEvent of
-    (NoEvent, remainingSessions) ->
-      trace ("NoEvent in multiSimulate @ " <> show ieTick <> ", " <> show (length remainingSessions) <> " sessions left") $
-        continueSim Nothing remainingSessions
+    (NoEvent, remainingSessions) -> do
+      logString $ "multiSimulate: NoEvent @ " <> show ieTick <> ", " <> show (length remainingSessions) <> " sessions left"
+      continueSim Nothing remainingSessions
     (OutputEvent {oeNext, oeEvent}, newState) -> do
       forM_ oeEvent deliverEvent
       continueSim (Just $ oeNext `after` ieTick) newState
@@ -329,65 +385,115 @@ multiSimulate stepper deliverEvent nextSim (MultiSimulator state) inputEvent@(In
     continueSim suggestedNextTick sessions =
       let nextTick = getMin <$> (Min <$> suggestedNextTick) <> getMultiSessionNextTick sessions
        in case nextTick of
-            Nothing -> trace "No next tick -> stopping sim" $ return ()
-            Just nt -> nextSim (MultiSimulator sessions) $ InputEvent {ieTick = nt, ieTrigger = Nothing}
+            Nothing -> logString "No next tick -> stopping sim"
+            Just nt -> nextSim sessions $ InputEvent {ieTick = nt, ieTrigger = Nothing}
     getMultiSessionNextTick :: MultiSession -> Maybe (Min Timestamp)
     getMultiSessionNextTick sessions = (\(nextPriority, _, _) -> Min nextPriority) <$> PriorityMap.lookupFirst sessions
 
-multiSimulator :: (MonadIO m) => Config -> (MultiSimulator -> InputEvent (SessionKey, SimulationSetChargingProfile) -> m ()) -> MultiSimulator -> InputEvent (SessionKey, SimulationSetChargingProfile) -> m ()
-multiSimulator config = multiSimulate multiStepper (deliverSessionOutputIO config)
-
 recurseMultiSimulation ::
-  (MonadIO m) =>
-  Config ->
-  -- | Conversion function from current (wall clock time) to simulation timestamps
-  (UTCTime -> Timestamp) ->
+  (Monad m, Show i) =>
+  -- | Get event for next simulation step: wait at most until the given
+  -- deadline 'Timestamp' (i.e. for at most 'Duration').  If no external event
+  -- arrives by then, return `Nothing`; otherwise, return `Just (d, evt)`
+  -- where `d` is the 'Duration' until the 'InputEvent' and `evt` is the
+  -- external event.
+  (Timestamp -> Duration -> m (Maybe (Duration, i))) ->
+  -- | Find out for which 'Session' an external event is intended
+  (MultiSession -> i -> Maybe SessionKey) ->
+  -- | Get current simulation Timestamp
+  (MultiSession -> m Timestamp) ->
+  (String -> m ()) ->
   -- | When is simulation finished?
   Timestamp ->
-  -- | Channel to query for next event from external source
-  MVar SimulationSetChargingProfile ->
+  (MultiSession -> InputEvent (SessionKey, i) -> m ()) ->
   -- | Starting state of next simulation step
-  MultiSimulator ->
+  MultiSession ->
   -- | Next input event in case no external event arrives first
-  InputEvent (SessionKey, SimulationSetChargingProfile) ->
+  InputEvent (SessionKey, i) ->
   m ()
-recurseMultiSimulation config wallClockToTimestamp finalTimestamp eventChannel simState evt@(InputEvent {ieTick, ieTrigger}) = do
-  now <- wallClockToTimestamp <$> liftIO getCurrentTime
+recurseMultiSimulation getNxtEvt getEvtSessKey getSimTime logString finalTimestamp theSimulator simState evt@(InputEvent {ieTick, ieTrigger}) = do
+  now <- getSimTime simState
   -- When waiting for an external event, avoid the situation where the
   -- external event falls exactly at the same time as evt's ieTrigger and
   -- evt's ieTrigger gets lost.
   let externalEventDeadline = case ieTrigger of
         Just _ -> milliseconds 1 `before` ieTick
         Nothing -> ieTick
-  liftIO $ putStrLn $ "now=" <> show now <> ", externalEventDeadline=" <> show externalEventDeadline <> ", simState=" <> show simState <> ", evt=" <> show evt
-  let continueSimulation = multiSimulator config (recurseMultiSimulation config wallClockToTimestamp finalTimestamp eventChannel) simState
+  logString $ "now=" <> show now <> ", externalEventDeadline=" <> show externalEventDeadline <> ", simState=" <> show simState <> ", evt=" <> show evt
+  let continueSimulation = theSimulator simState
   if now < finalTimestamp
     then case now `maybeDurationUntil` min externalEventDeadline finalTimestamp of
       Just duration ->
-        getNextEvent
-          wallClockToTimestamp
-          eventChannel
-          (duration `after` now)
-          duration
-          (evt {ieTrigger = snd <$> ieTrigger})
-          >>= continueSimulation . mapEventToSession simState
+        getNxtEvt (duration `after` now) duration >>= continueSimulation . selectNextEvent
       Nothing -> continueSimulation evt
-    else liftIO $ putStrLn $ "Simulation done at " <> show now
+    else logString $ "Simulation done at " <> show now
   where
-    mapEventToSession :: MultiSimulator -> InputEvent SimulationSetChargingProfile -> InputEvent (SessionKey, SimulationSetChargingProfile)
-    mapEventToSession _ InputEvent {ieTick = ii, ieTrigger = Nothing} = InputEvent {ieTick = ii, ieTrigger = Nothing}
-    mapEventToSession
-      (MultiSimulator allSessions)
-      InputEvent {ieTick = ii, ieTrigger = tt@(Just (SimulationSetChargingProfile {scpTransactionId}))} =
-        case find (matchTransactionId scpTransactionId) $ PriorityMap.listContents allSessions of
-          Nothing -> InputEvent {ieTick = ii, ieTrigger = Nothing}
-          Just (_, k, _) -> InputEvent {ieTick = ii, ieTrigger = fmap (k,) tt}
-    matchTransactionId :: TransactionId -> (Timestamp, SessionKey, (Session, Timestamp)) -> Bool
-    matchTransactionId xctnId (_, _, (Session _ Charging {transactionId}, _)) = xctnId == transactionId
-    matchTransactionId _ _ = False
+    selectNextEvent Nothing = evt -- no external event -> fall back on default event
+    selectNextEvent (Just (d, trggr)) =
+      case getEvtSessKey simState trggr of
+        Nothing -> evt -- external event without Session to receive it -> fall back on default event
+        Just k -> InputEvent {ieTick = d `before` ieTick, ieTrigger = Just (k, trggr)}
+
+mapEventToSession :: MultiSession -> SimulationSetChargingProfile -> Maybe SessionKey
+mapEventToSession
+  allSessions
+  SimulationSetChargingProfile {scpTransactionId} =
+    (\(_, k, _) -> k) <$> find (matchTransactionId scpTransactionId) (PriorityMap.listContents allSessions)
+    where
+      matchTransactionId :: TransactionId -> (Timestamp, SessionKey, (Session, Timestamp)) -> Bool
+      matchTransactionId xctnId (_, _, (Session _ Charging {transactionId}, _)) = xctnId == transactionId
+      matchTransactionId _ _ = False
+
+startMultiSimulation ::
+  (Monad m, Show i) =>
+  -- | Step a single 'Session' from its current timestamp (assumed to be the
+  -- 'Duration' before the 'InputEvent'\'s 'ieTick') for the 'Duration' and
+  -- reacting to the 'InputEvent'\'s 'ieTrigger'
+  (Session -> Duration -> InputEvent i -> (OutputEvent [] e, Session)) ->
+  -- | Deliver the output events to the external world
+  (e -> m ()) ->
+  -- | Wait until the deadline (i.e. for the given 'Duration') for an external
+  -- event to happen.  If an external event happens, return the 'Duration'
+  -- from the moment the external event happened to the deadline 'Timestamp'
+  -- and the event.
+  (Timestamp -> Duration -> m (Maybe (Duration, i))) ->
+  -- | Map the external event to a 'SessionKey' so that the event can be
+  -- routed to the correct 'Session'
+  (MultiSession -> i -> Maybe SessionKey) ->
+  -- | Return the current 'Timestamp' of the simulation's state.
+  (MultiSession -> m Timestamp) ->
+  -- | Log a String
+  (String -> m ()) ->
+  -- | The 'Session's to simulate
+  MultiSession ->
+  -- | Starting time of the simulation (in the simulator time frame)
+  Timestamp ->
+  -- | Simulation will stop after this amount of time
+  Duration ->
+  m ()
+startMultiSimulation stepSingleSession deliverSessionOutput getNxtEvt mapEvtToSess getSimTime logString allSessions t0 duration = do
+  let firstTick = case PriorityMap.lookupFirst allSessions of
+        Just (nextTimestamp, _, _) -> nextTimestamp
+        Nothing -> duration `after` t0
+  logString $ "Starting simulation at " <> show t0 <> " for " <> show (secondsFrom duration) <> "s with " <> show (length allSessions) <> " sessions. firstTick=" <> show firstTick
+  let sim =
+        multiSimulate
+          logString
+          (multiStepper stepSingleSession)
+          deliverSessionOutput
+          $ recurseMultiSimulation
+            getNxtEvt
+            mapEvtToSess
+            getSimTime
+            logString
+            (duration `after` t0)
+            sim
+  sim allSessions (InputEvent {ieTick = firstTick, ieTrigger = Nothing})
 
 -- | Start a simulation of several charging sessions on different charging stations in parallel
-startMultiSimulation ::
+--
+-- Wrapper for 'startMultiSimulation', which see.
+startMultiSimulationIO ::
   (MonadIO m) =>
   -- | Configuration
   Config ->
@@ -400,14 +506,17 @@ startMultiSimulation ::
   -- | Simulation will stop after this amount of time
   Duration ->
   m ()
-startMultiSimulation config eventChannel allSessions t0 duration = do
+startMultiSimulationIO config eventChannel allSessions t0 duration = do
   refTime <- liftIO getCurrentTime -- refTime [wall clock time] corresponds to t0 [simulation time]
   let wallClockToTimestamp = utcTimeToSimulationTime t0 refTime
-  let firstTick = case PriorityMap.lookupFirst allSessions of
-        Just (nextTimestamp, _, _) -> nextTimestamp
-        Nothing -> duration `after` t0
-  multiSimulator
-    config
-    (recurseMultiSimulation config wallClockToTimestamp (duration `after` t0) eventChannel)
-    (MultiSimulator allSessions)
-    (InputEvent {ieTick = firstTick, ieTrigger = Nothing})
+  liftIO $
+    startMultiSimulation
+      stepSession
+      (deliverSessionOutputIO config)
+      (getNextEvent' eventChannel wallClockToTimestamp)
+      mapEventToSession
+      (const $ wallClockToTimestamp <$> getCurrentTime)
+      (liftIO . putStrLn)
+      allSessions
+      t0
+      duration
